@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CoralieCore — Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 600px;
+      width: 100%;
+      padding: 40px;
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+
+    .section {
+      margin-bottom: 30px;
+    }
+
+    .section h2 {
+      color: #667eea;
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 15px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background 0.2s;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+
+    button:hover {
+      background: #764ba2;
+    }
+
+    .output {
+      background: #f5f7fa;
+      border-left: 4px solid #667eea;
+      padding: 15px;
+      border-radius: 4px;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 13px;
+      color: #333;
+      line-height: 1.6;
+      word-break: break-all;
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 10px;
+    }
+
+    .label {
+      display: block;
+      font-weight: 500;
+      color: #333;
+      margin-bottom: 5px;
+      font-size: 13px;
+    }
+
+    .success {
+      color: #22c55e;
+      font-weight: 600;
+    }
+
+    .error {
+      color: #ef4444;
+      font-weight: 600;
+    }
+
+    .loading {
+      color: #667eea;
+      font-style: italic;
+    }
+
+    .identity-card {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 10px;
+      font-size: 12px;
+    }
+
+    .identity-card strong {
+      color: #667eea;
+    }
+
+    .pubkey {
+      font-family: 'Monaco', 'Courier New', monospace;
+      background: white;
+      padding: 4px 8px;
+      border-radius: 3px;
+      display: inline-block;
+      margin-top: 4px;
+      max-width: 100%;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🌐 Nostr WebRTC Mesh</h1>
+    <p class="subtitle">Decentralized peer-to-peer networking. Running in your browser.</p>
+
+    <!-- Key Generation -->
+    <div class="section">
+      <h2>Generate Identity</h2>
+      <button onclick="generateIdentity()">Generate New Key Pair</button>
+      <div id="identity-output" class="output" style="display: none;"></div>
+    </div>
+
+    <!-- Signing -->
+    <div class="section">
+      <h2>Sign & Verify</h2>
+      <button onclick="signEvent()">Sign Nostr Event</button>
+      <div id="signing-output" class="output" style="display: none;"></div>
+    </div>
+
+    <!-- Encryption -->
+    <div class="section">
+      <h2>Encryption Demo</h2>
+      <button onclick="encryptionDemo()">Encrypt Message (Alice → Bob)</button>
+      <div id="encryption-output" class="output" style="display: none;"></div>
+    </div>
+
+    <!-- Clear -->
+    <div class="section">
+      <button onclick="clearAll()" style="background: #999;">Clear Output</button>
+    </div>
+  </div>
+
+  <!-- Load from jsDelivr CDN -->
+  <script src="../dist/index.global.js"></script>
+
+  <script>
+    const { Signer, createStateFlow } = CoralieCore
+
+    // Store state
+    let identities = []
+
+    function log(elementId, message, type = 'info') {
+      const el = document.getElementById(elementId)
+      el.style.display = 'block'
+
+      const timestamp = new Date().toLocaleTimeString()
+      const className = type === 'success' ? 'success' : type === 'error' ? 'error' : ''
+      const line = `<div><span style="color: #999;">[${timestamp}]</span> <span class="${className}">${message}</span></div>`
+
+      el.innerHTML = el.innerHTML + line
+      el.scrollTop = el.scrollHeight
+    }
+
+    function clearAll() {
+      document.getElementById('identity-output').innerHTML = ''
+      document.getElementById('signing-output').innerHTML = ''
+      document.getElementById('encryption-output').innerHTML = ''
+      document.getElementById('identity-output').style.display = 'none'
+      document.getElementById('signing-output').style.display = 'none'
+      document.getElementById('encryption-output').style.display = 'none'
+      identities = []
+    }
+
+    function generateIdentity() {
+      try {
+        const signer = Signer.generate()
+        identities.push(signer)
+
+        const html = `
+          <div class="identity-card">
+            <strong>Identity #${identities.length}</strong><br>
+            <strong>Public Key:</strong><br>
+            <div class="pubkey">${signer.pubkeyHex}</div>
+          </div>
+        `
+
+        log('identity-output', html, 'success')
+        log('identity-output', `✓ Generated identity #${identities.length} (total: ${identities.length})`, 'success')
+      } catch (err) {
+        log('identity-output', `✗ Error: ${err.message}`, 'error')
+      }
+    }
+
+    function signEvent() {
+      try {
+        if (identities.length === 0) {
+          log('signing-output', 'Generate an identity first!', 'error')
+          return
+        }
+
+        const signer = identities[0]
+        const event = signer.sign({
+          pubkey: signer.pubkeyHex,
+          created_at: Math.floor(Date.now() / 1000),
+          kind: 1,
+          tags: [],
+          content: 'Hello from the mesh! 🚀'
+        })
+
+        const isValid = signer.verify(event)
+
+        log('signing-output', `<strong>Event ID:</strong> ${event.id}`, 'success')
+        log('signing-output', `<strong>Signature:</strong> ${event.sig.slice(0, 32)}...`, 'success')
+        log('signing-output', `<strong>Verified:</strong> ${isValid ? '✓ Yes' : '✗ No'}`, isValid ? 'success' : 'error')
+      } catch (err) {
+        log('signing-output', `✗ Error: ${err.message}`, 'error')
+      }
+    }
+
+    function encryptionDemo() {
+      try {
+        if (identities.length < 2) {
+          log('encryption-output', 'Generate at least 2 identities first!', 'error')
+          return
+        }
+
+        const alice = identities[0]
+        const bob = identities[1]
+
+        const message = '🤫 This is a secret message!'
+        const encrypted = alice.encryptNip44(bob.pubkeyHex, message)
+        const decrypted = bob.decryptNip44(alice.pubkeyHex, encrypted)
+
+        log('encryption-output', `<strong>Original Message:</strong> ${message}`, 'success')
+        log('encryption-output', `<strong>Encrypted (NIP-44):</strong> ${encrypted.slice(0, 48)}...`, 'info')
+        log('encryption-output', `<strong>Decrypted by Bob:</strong> ${decrypted}`, 'success')
+        log('encryption-output', `<strong>Decryption Match:</strong> ${decrypted === message ? '✓ Yes' : '✗ No'}`, decrypted === message ? 'success' : 'error')
+      } catch (err) {
+        log('encryption-output', `✗ Error: ${err.message}`, 'error')
+      }
+    }
+
+    // Show initial message
+    log('identity-output', '<span class="loading">Ready. Click "Generate Identity" to start.</span>', 'info')
+  </script>
+</body>
+</html>
