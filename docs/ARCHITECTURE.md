@@ -115,7 +115,7 @@ populated for the same pubkey at once.
 
 ---
 
-## 4. Concurrency model (the one place this port genuinely diverges)
+## 4. Concurrency model
 
 The Kotlin implementation gets state-confinement for free from a
 single-threaded coroutine dispatcher (`limitedParallelism(1)`) — every
@@ -150,29 +150,54 @@ without introducing any new concurrency primitive Kotlin didn't need.
 
 ## 5. Module structure
 
+Each unit of behavior lives in its own folder, split into an
+interface, a live (real) implementation, a mock (test-double)
+implementation, unit tests, and a small barrel:
+
+```
+{component}/
+  {component}.interface.ts   # the contract — what the rest of the app depends on
+  {component}.live.ts        # real implementation (Live prefix, e.g. LiveRelaySocket)
+  {component}.mock.ts        # test double (Mock prefix, e.g. MockRelaySocket)
+  {component}.test.ts        # unit tests, written against the interface
+  index.ts                   # re-exports interface + Live + Mock
+```
+
 ```
 src/
-  emitter.ts                    # tiny pub/sub primitives (StateFlow-like + SharedFlow-like)
-  types.ts                      # LinkState, SessionDescriptionData, DataChannelFrame,
-                                 # PeerMessage, TerminalFailure, NostrEvent, UnsignedNostrEvent
+  core/
+    types.ts                     # LinkState, SessionDescriptionData, DataChannelFrame,
+                                  # PeerMessage, TerminalFailure, NostrEvent, UnsignedNostrEvent
+    state-flow/                  # StateFlow — Kotlin StateFlow-like hot observable
+    shared-flow/                 # SharedFlow — Kotlin SharedFlow-like hot observable
   crypto/
-    signer.ts                   # Signer — generate(), sign(), ecdh(), getConvoKey()
-                                 # (thin wrapper over nostr-tools/pure + nostr-tools/nip44)
+    signer/                      # Signer — generate/sign/verify/ecdh/NIP-44/sha256,
+                                  # thin wrapper over nostr-tools/pure + nostr-tools/nip44
   nostr/
-    deduping-event-sink.ts      # DedupingEventSink — cross-relay dedup by event id
-    relay-socket.ts             # LiveRelaySocket — one relay WebSocket + exponential backoff
-    relay-session.ts            # LiveRelaySession — subscribe/publish on top of a socket
-    signalling-client.ts        # LiveNostrSignallingClient — multi-relay fan-out,
-                                 # NIP-44 encrypt/decrypt of offer/answer payloads
+    event-sink/                  # EventSink — cross-relay dedup by event id
+    relay-socket/                 # RelaySocket — one relay WebSocket + exponential backoff
+    relay-session/                # RelaySession — subscribe/publish on top of a socket
+    signalling-client/            # SignallingClient — multi-relay fan-out,
+                                  # NIP-44 encrypt/decrypt of offer/answer payloads
   webrtc/
-    initiator.ts                # Initiator — offer side of handshake
-    answerer.ts                 # Answerer — answer side of handshake
-    peer-link.ts                # PeerLink — post-handshake, open data channel
-  live-connection-manager.ts    # orchestrator — implements §2's six rules directly
-  mesh-endpoints.ts             # DEFAULT_MESH_ENDPOINTS (relayUrls + iceServers), overridable
+    peer-connection/               # PeerConnectionLike — thin contract over RTCPeerConnection;
+                                  # exercised via Initiator/Answerer/PeerLink, no dedicated unit test file
+    initiator/                    # Initiator — offer side of handshake
+    answerer/                     # Answerer — answer side of handshake
+    peer-link/                    # PeerLink — post-handshake, open data channel
+  live-connection-manager.ts     # orchestrator — implements §2's six rules directly
+  mesh-endpoints.ts              # DEFAULT_MESH_ENDPOINTS (relayUrls + iceServers), overridable
   create-live-connection-manager.ts   # factory — wires signer + relays + manager together
-  index.ts                      # public exports: createLiveConnectionManager + types only
+  index.ts                       # barrel export
+  demo.spec.ts                   # Playwright e2e tests, driven against examples/demo.html
+examples/
+  demo.html                      # interactive live test bed — loads the built IIFE bundle
 ```
+
+**Naming convention:**
+- Interface — bare component name (`RelaySocket`, `Signer`, `Initiator`)
+- Live implementation — `Live` prefix (`LiveRelaySocket`, `LiveSigner`)
+- Test double — `Mock` prefix (`MockRelaySocket`, `MockSigner`)
 
 ### Public API
 
@@ -196,8 +221,12 @@ export type { PeerMessage, TerminalFailure }
 ```
 
 Everything under `crypto/`, `nostr/`, and `webrtc/` is internal
-implementation detail, never re-exported. Consumers get one function
-and a handful of types — nothing else is part of the contract.
+implementation detail and is never part of the published contract.
+Until the factory (Phase 5) exists, `src/index.ts` re-exports every
+component's interface/Live/Mock surface so the library is usable
+end-to-end for development, the browser demo, and testing; trimming
+down to just `createLiveConnectionManager` plus the types above is the
+last step of Phase 5.
 
 ### Defaults
 
@@ -249,6 +278,34 @@ via Nostr — the relay layer only ever carries `Offer`/`Answer`
 signalling for the initial handshake. Malformed frames are logged and
 dropped; they never crash the reader loop for that peer.
 
+### Testing strategy
+
+Two layers of tests, both living next to the code they exercise:
+
+- **Unit tests** (`*.test.ts`, Vitest, Node environment) — one file
+  per component, written against the interface and exercised with
+  `Mock` implementations of that component's dependencies. Fast, no
+  network, no real browser APIs.
+- **Browser end-to-end tests** (`*.spec.ts`, Playwright) — exercise
+  the built IIFE bundle (`dist/index.global.js`) loaded into
+  `examples/demo.html` inside a real Chrome instance
+  (`channel: 'chrome'` — no bundled browser download). These are the
+  only tests that touch a real `RTCPeerConnection` and real ICE
+  gathering; everything else is mocked at the component boundary.
+
+`npm test` runs the unit suite; `npm run test:e2e` runs the browser
+suite separately, since it depends on `npm run build` having produced
+`dist/` first and drives a real browser rather than running in Node.
+
+### Build & distribution
+
+`tsup` builds `src/index.ts` to three targets in one pass: ESM
+(`dist/index.js`), CommonJS (`dist/index.cjs`), and a browser IIFE
+(`dist/index.global.js`, global name `CoralieCore`) — plus a single
+`.d.ts`. The published package ships this flattened `dist/` output
+(`package.json`'s `exports` map points at it), not the multi-file
+`src/` tree; consumers never need their own bundler to flatten it.
+
 ### Dependencies
 
 | Package | Role | License |
@@ -276,117 +333,92 @@ Integration tests are called out separately where they span modules.
 
 ### Phase 0 — Scaffolding, types, crypto ✅ COMPLETE
 
-**Builds:** `package.json`, `tsconfig.json`, vitest config, `src/core/types.ts`, `src/core/emitter.ts`, `src/crypto/signer.ts`
+**Built:** `package.json`, `tsconfig.json`, `vitest.config.ts`,
+`tsup.config.ts`, `src/core/types.ts`, `src/core/state-flow/`,
+`src/core/shared-flow/`, `src/crypto/signer/`
 
-- Package setup: `package.json` with `nostr-tools` (crypto), `vitest` (testing), `tsup` (bundling)
-- TypeScript config (strict, ES2020 target, ESNext modules)
-- Vitest config with recursive test glob (`src/**/*.test.ts`)
-- **Core types:** `LinkState`, `SessionDescriptionData`, `DataChannelFrame`, `PeerMessage`, `TerminalFailure`, `NostrEvent`, `UnsignedNostrEvent`
-- **Pub/sub primitives:** `StateFlow<T>` and `SharedFlow<T>` (Kotlin Flow-like hot observables)
-- **Crypto layer:** `Signer` class wrapping `nostr-tools`:
-  - `generate()` — random identity
-  - `sign()` — finalize + sign Nostr events
-  - `verify()` — validate signatures
-  - `ecdh()` — shared secret derivation
-  - `encryptNip44()` / `decryptNip44()` — NIP-44 v2 encryption
-  - `sha256()` — hashing utilities
-- **Build outputs:** ESM (`.mjs`), CommonJS (`.cjs`), IIFE browser bundle (`.global.js`), TypeScript definitions (`.d.ts`)
-- **Browser demo:** `examples/demo.html` — interactive tests for key generation, signing, encryption (loads IIFE bundle locally)
+- Package setup: `nostr-tools` (crypto), `vitest` (unit tests), `tsup`
+  (bundling), `@playwright/test` (browser e2e tests).
+- Strict TypeScript, ES2020 target, ESNext modules.
+- **Core types** — `LinkState`, `SessionDescriptionData`,
+  `DataChannelFrame`, `PeerMessage`, `TerminalFailure`, `NostrEvent`,
+  `UnsignedNostrEvent`.
+- **Pub/sub primitives** — `StateFlow<T>` and `SharedFlow<T>`, each as
+  an interface/Live/Mock trio (Kotlin `Flow`-like hot observables).
+- **Crypto layer** — `Signer` (interface/Live/Mock), wrapping
+  `nostr-tools`: `generate()`, `sign()`, `verify()`, `ecdh()`,
+  `encryptNip44()` / `decryptNip44()`, `sha256()`.
+- **Build outputs** — ESM, CommonJS, and browser IIFE bundles plus a
+  single `.d.ts`, via `tsup`.
+- **Browser demo** — `examples/demo.html`, an interactive test bed
+  loading the IIFE bundle locally, exercising identity generation,
+  NIP-44 encryption, relay connectivity, and peer-to-peer WebRTC chat
+  against the real library.
 
-**Unit tests:** ~22 passing
-- `src/core/emitter.test.ts` — StateFlow/SharedFlow semantics
-- `src/crypto/signer.test.ts` — signing, verification, ECDH, NIP-44 encryption
+### Phase 1 — Deduping event sink ✅ COMPLETE
 
-**Directory structure:** `src/core/` (primitives), `src/crypto/` (signing), `src/nostr/`, `src/webrtc/`, `src/orchestrator/` (stubbed for future phases), `docs/`, `examples/`
+**Built:** `src/nostr/event-sink/`
 
-### Phase 1 — Deduping event sink
+- `EventSink` interface; `LiveDedupingEventSink` tracks seen event IDs
+  within a bounded retention window (default 5 minutes) and evicts by
+  age, dropping duplicates arriving from a second relay.
+- `MockEventSink` test double.
 
-**Builds:** `nostr/deduping-event-sink.ts`
+### Phase 2 — Nostr relay/signalling layer ✅ COMPLETE
 
-- `DedupingEventSink` — tracks seen event IDs (bounded, evict oldest),
-  drops duplicates arriving from a second relay.
-- Configurable retention window (default: 5 minutes).
-- Garbage-collects stale entries by age.
-- Thread-safe (or JS-equivalent: identity-checked after every await).
-
-**Unit tests:**
-- `deduping-event-sink.test.ts`:
-  - Same event ID from two relays → second is dropped.
-  - Event ID expires after retention window → is accepted again.
-  - Adding a new event before expiry → is accepted (new ID).
-  - Retention window respects insertion order (oldest evicted first).
-
-### Phase 2 — Nostr relay/signalling layer
-
-**Builds:** `nostr/relay-socket.ts`, `nostr/relay-session.ts`, `nostr/signalling-client.ts`
+**Built:** `src/nostr/relay-socket/`, `src/nostr/relay-session/`,
+`src/nostr/signalling-client/`
 
 - `LiveRelaySocket` — one relay connection, exponential backoff
-  reconnect, exposes connect state.
-- `LiveRelaySession` — subscribe (filter by `#p` tag = my pubkey),
+  reconnect, exposes connection state as a `StateFlow`. **`send()`
+  rejects rather than queues** when the socket isn't open — it returns
+  an `err` `Result` immediately; callers are responsible for retrying,
+  matching the "fail fast, let the retry counter handle it"
+  philosophy of §2 rule 4.
+- `LiveRelaySession` — subscribe (filtered by `#p` tag = my pubkey) and
   publish, layered on a socket.
-- `LiveNostrSignallingClient` — fans a single logical
-  send/subscribe out across all configured relays, encrypts outbound
-  payloads and decrypts inbound ones via NIP-44 using `Signer`,
-  de-duplicates inbound events via the sink.
+- `LiveNostrSignallingClient` — fans a single logical send/subscribe
+  out across every configured relay, NIP-44 encrypts outbound payloads
+  and decrypts inbound ones via `Signer`, de-duplicates inbound events
+  via `EventSink`.
 
-**Unit tests:**
-- `deduping-event-sink.test.ts` — same event ID delivered twice is
-  only emitted once; different event IDs both pass through; eviction
-  doesn't cause false "new" positives for an already-seen-then-evicted
-  ID within a test's practical timeframe (document the bound, don't
-  necessarily test the eviction edge exhaustively).
-- `relay-socket.test.ts` (mocked WebSocket) — backoff timing follows
-  the expected curve on repeated failures; a successful connection
-  resets the backoff counter; messages sent before the socket is open
-  are queued or rejected per spec (pin down which — see open question
-  in §7).
-- `signalling-client.test.ts` (mocked relay sockets) — an outbound
-  message is NIP-44 encrypted before being handed to every relay; an
-  inbound event is decrypted and only surfaces once even if multiple
-  mock relays deliver the identical event; a message that fails to
-  decrypt (wrong key, corrupt payload) is dropped, not thrown past the
-  caller.
+A real-network integration test against the live default relay list
+(two `Signer` identities exchanging an encrypted payload through
+`LiveNostrSignallingClient`) is still pending — planned as
+`signalling-client.integration.test.ts`, gated behind a
+`test:integration` script and kept out of the default `npm test` run.
 
-**Integration test (Phase 3, real network — separately gated):**
-- `signalling-client.integration.test.ts` — two `Signer` identities,
-  two `LiveNostrSignallingClient`s pointed at the real default relay
-  list, one sends an encrypted payload addressed to the other's
-  pubkey, the other receives and correctly decrypts it. This is the
-  first point in the plan where "does this actually work against
-  public relays" gets verified, and it should run against the literal
-  default relay list since that's what ships. Gate this behind an
-  explicit npm script (e.g. `test:integration`), not the default `test`
-  run, since it depends on external network state and public relay
-  availability/latency.
+### Phase 3 — WebRTC layer ✅ COMPLETE
 
-### Phase 3 — WebRTC layer
+**Built:** `src/webrtc/peer-connection/`, `src/webrtc/initiator/`,
+`src/webrtc/answerer/`, `src/webrtc/peer-link/`
 
-**Builds:** `webrtc/initiator.ts`, `webrtc/answerer.ts`,
-`webrtc/peer-link.ts`
-
-- `Initiator` — wraps `RTCPeerConnection`, `createOffer()`,
-  `acceptAnswer()`, exposes `LinkState` as a `StateFlow`-like emitter,
-  owns the handshake-timeout check.
-- `Answerer` — wraps `RTCPeerConnection` given an inbound offer,
+- `PeerConnectionLike` — a thin contract over `RTCPeerConnection`.
+  `createOffer()` / `createAnswer()` own local-description-setting and
+  ICE gathering internally, resolving only once
+  `iceGatheringState === 'complete'` (vanilla, non-trickle ICE — the
+  returned SDP always has every candidate baked in already; there is
+  no separate `setLocalDescription()` step in the contract).
+  `LivePeerConnection` wraps the real browser `RTCPeerConnection`; it
+  has no dedicated unit test file, since it's exercised directly by
+  `Initiator`, `Answerer`, and `PeerLink`'s own tests and by the
+  browser e2e handshake test.
+- `Initiator` — wraps a `PeerConnectionLike`, `createOffer()`,
+  `acceptAnswer()`, exposes `LinkState` as a `StateFlow`, owns the
+  handshake-timeout check.
+- `Answerer` — wraps a `PeerConnectionLike` given an inbound offer,
   `createAnswer()`, same `LinkState` exposure.
 - `PeerLink` — wraps an open `RTCDataChannel`: `send()`,
-  `incomingBytes` (SharedFlow-like), `state`, `close()`.
+  `incomingBytes` (`SharedFlow`), `state`, `close()`.
 
-**Unit tests** (using a WebRTC-capable test environment — see §7 open
-question on runtime):
-- `initiator.test.ts` / `answerer.test.ts` — offer/answer exchanged
-  directly in-process (no signalling layer involved, no network)
-  between an `Initiator` and an `Answerer` reaches `Connected` state;
-  an `Initiator` with no matching answerer times out at the configured
-  `handshakeTimeout` and transitions to `HandshakeTimedOut`.
-- `peer-link.test.ts` — once two linked peer connections are open,
-  `send()` on one side is observed via `incomingBytes` on the other;
-  closing one side's connection surfaces as a state transition on the
-  other.
-
-*No integration test needed at this phase specifically* — Phase 5's
-integration tests cover WebRTC + signalling together, which is the
-combination that actually matters.
+Unit tests use `MockPeerConnection` /
+`createLinkedMockPeerConnections()` (in-memory, linked pairs) to cover
+the handshake state machine without a real network. Real
+`RTCPeerConnection` behavior is validated separately by a Playwright
+browser e2e test that drives `LiveInitiator` and `LiveAnswerer`
+against a real loopback WebRTC connection (no STUN needed — both peers
+are the same page) and confirms it reaches `Connected` on both sides
+and exchanges a data-channel message.
 
 ### Phase 4 — Orchestrator
 
@@ -401,8 +433,8 @@ traceable port of the Kotlin reference, and should carry the same rule
 references in comments (mirroring the Kotlin's `§6.x` style) so the
 two implementations stay auditable against each other.
 
-**Unit tests** (signalling and WebRTC layers mocked/faked — this phase
-tests *rule logic*, not real networking):
+**Unit tests** (signalling and WebRTC layers mocked — this phase tests
+*rule logic*, not real networking):
 - `live-connection-manager.test.ts`:
   - Rule 1: `addPeer(newPubkey)` creates an `initiating` entry and
     triggers an offer send; calling it again with the same pubkey
@@ -428,7 +460,7 @@ tests *rule logic*, not real networking):
     independently exhaust their 5 retries and both terminal-fail,
     with neither side ever completing a handshake. This is the
     explicit regression test for the intended (not accidental)
-    deadlock behavior described in §2.4.
+    deadlock behavior described in §2 rule 4.
   - Rule 5: a connection reaching open removes it from `initiating`
     (or confirms it was never there, for the answerer path), adds it
     to `connected`, and triggers exactly one `Announce` broadcast to
@@ -449,12 +481,13 @@ tests *rule logic*, not real networking):
 ### Phase 5 — Factory & defaults
 
 **Builds:** `mesh-endpoints.ts`, `create-live-connection-manager.ts`,
-`index.ts`
+`index.ts` (trimmed)
 
 - Wires `Signer.generate()`, the relay/ICE endpoint lists (defaults or
   overrides), the signalling client, and `LiveConnectionManager`
   together into one function.
-- `index.ts` exports exactly the public surface from §5 — nothing more.
+- `index.ts` is trimmed to export exactly the public surface from §5
+  — nothing more.
 
 **Unit tests:**
 - `create-live-connection-manager.test.ts` — omitting `relayUrls`
@@ -503,36 +536,14 @@ just unit-tested in isolation.
   timeout is made configurable and shortened for this test run — the
   constructor already exposes this as a tunable, so the test should
   use a short timeout rather than accept a 2.5-minute test).
-- **NIP-44 interop check** — reuse the Phase 3 integration test's
-  two-identity setup, but drive it through the full
+- **NIP-44 interop check** — reuse the signalling-client integration
+  test's two-identity setup, but drive it through the full
   `createLiveConnectionManager` factory rather than the raw signalling
   client, confirming the crypto and signalling layers compose
   correctly end to end, not just individually.
 
-Like Phase 3's integration test, all of Phase 7 should be gated behind
-an explicit `test:integration` script, kept out of the default fast
-unit-test run, and clearly documented as depending on either real
-public relay availability or (for the WebRTC-only tests) a
-WebRTC-capable test runtime.
-
----
-
-## 7. Open questions to resolve before/during implementation
-
-These don't block starting Phase 0–2, but should be settled before the
-phases that depend on them:
-
-- **Test runtime for WebRTC.** `RTCPeerConnection` isn't available in
-  plain Node without a shim. Options: run WebRTC-touching tests
-  (Phases 4, 7) in a real browser via Playwright/`@vitest/browser`, or
-  use a Node WebRTC implementation (e.g. `node-datachannel` or similar)
-  as a test-only dependency. This choice affects Phase 4's test setup
-  directly and should be settled before that phase starts.
-- **Queued-vs-rejected sends on a not-yet-open relay socket.** Called
-  out inline in Phase 3 — needs a concrete answer before
-  `relay-socket.test.ts` can be written precisely.
-- **Bundling/distribution shape.** Whether the published package is a
-  single flattened bundle or ships the multi-file `src/` structure for
-  the consumer's own bundler to flatten — doesn't block writing the
-  module itself, but affects Phase 0's tooling setup and Phase 6's
-  build-output test.
+Like the signalling-client integration test, all of Phase 6 should be
+gated behind an explicit `test:integration` script, kept out of the
+default fast unit-test run, and clearly documented as depending on
+either real public relay availability or (for the WebRTC-only tests) a
+real browser test runtime.

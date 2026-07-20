@@ -1,275 +1,454 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CoralieCore — Demo</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Coralie — live test bed</title>
+<style>
+  :root {
+    --bg: #0a0d0c;
+    --panel: #101513;
+    --panel-border: #1e2a26;
+    --ink: #d8e4df;
+    --ink-dim: #7c948c;
+    --accent: #4fd8b0;
+    --accent-dim: #2b8c72;
+    --amber: #e0b34a;
+    --red: #e0645a;
+    --mono: 'Berkeley Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 1px 1px, #16201c 1px, transparent 0) 0 0/28px 28px,
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 32px 24px 80px;
+  }
+  header { max-width: 880px; margin: 0 auto 32px; }
+  header h1 {
+    font-size: 20px;
+    letter-spacing: 0.02em;
+    margin: 0 0 6px;
+    color: var(--ink);
+  }
+  header h1 .dot { color: var(--accent); }
+  header p { color: var(--ink-dim); margin: 0; max-width: 60ch; }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
+  main { max-width: 880px; margin: 0 auto; display: grid; gap: 20px; }
 
-    .container {
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-      max-width: 600px;
-      width: 100%;
-      padding: 40px;
-    }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 3px;
+    padding: 18px 20px;
+  }
+  .panel h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    margin: 0 0 4px;
+  }
+  .panel .sub { color: var(--ink-dim); font-size: 12px; margin: 0 0 14px; }
 
-    h1 {
-      color: #333;
-      margin-bottom: 10px;
-      font-size: 28px;
-    }
+  button {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: transparent;
+    border: 1px solid var(--accent-dim);
+    color: var(--accent);
+    padding: 7px 12px;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: rgba(79, 216, 176, 0.08); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
 
-    .subtitle {
-      color: #666;
-      margin-bottom: 30px;
-      font-size: 14px;
-    }
+  input[type="text"] {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: #0d1210;
+    border: 1px solid var(--panel-border);
+    color: var(--ink);
+    padding: 7px 10px;
+    border-radius: 2px;
+    width: 100%;
+  }
+  input[type="text"]:focus { outline: 1px solid var(--accent-dim); border-color: var(--accent-dim); }
 
-    .section {
-      margin-bottom: 30px;
-    }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row + .row { margin-top: 10px; }
+  .grow { flex: 1; min-width: 0; }
 
-    .section h2 {
-      color: #667eea;
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 15px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
+  .pubkey {
+    font-size: 11px;
+    color: var(--ink-dim);
+    word-break: break-all;
+    background: #0d1210;
+    border: 1px solid var(--panel-border);
+    padding: 8px 10px;
+    border-radius: 2px;
+  }
+  .pubkey.mine { color: var(--accent); }
 
-    button {
-      background: #667eea;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      transition: background 0.2s;
-      margin-right: 10px;
-      margin-bottom: 10px;
-    }
+  .relay-list { display: grid; gap: 6px; }
+  .relay-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+  .relay-row .url { flex: 1; color: var(--ink-dim); }
+  .relay-row .state { width: 90px; text-align: right; }
 
-    button:hover {
-      background: #764ba2;
-    }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-dim); flex-shrink: 0; }
+  .dot.open { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .dot.connecting, .dot.reconnecting { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .dot.failed, .dot.closed { background: var(--red); }
 
-    .output {
-      background: #f5f7fa;
-      border-left: 4px solid #667eea;
-      padding: 15px;
-      border-radius: 4px;
-      font-family: 'Monaco', 'Courier New', monospace;
-      font-size: 13px;
-      color: #333;
-      line-height: 1.6;
-      word-break: break-all;
-      max-height: 300px;
-      overflow-y: auto;
-      margin-top: 10px;
-    }
+  .state-text.open { color: var(--accent); }
+  .state-text.connecting, .state-text.reconnecting { color: var(--amber); }
+  .state-text.failed, .state-text.closed { color: var(--red); }
 
-    .label {
-      display: block;
-      font-weight: 500;
-      color: #333;
-      margin-bottom: 5px;
-      font-size: 13px;
-    }
+  .log {
+    background: #0d1210;
+    border: 1px solid var(--panel-border);
+    border-radius: 2px;
+    padding: 10px 12px;
+    max-height: 180px;
+    overflow-y: auto;
+    font-size: 11.5px;
+    color: var(--ink-dim);
+  }
+  .log .line { white-space: pre-wrap; word-break: break-word; }
+  .log .line + .line { margin-top: 4px; }
+  .log .line.ok { color: var(--accent); }
+  .log .line.err { color: var(--red); }
 
-    .success {
-      color: #22c55e;
-      font-weight: 600;
-    }
+  .chat-log { max-height: 220px; }
+  .chat-log .line.me { color: var(--ink); }
+  .chat-log .line.me::before { content: "me  › "; color: var(--accent-dim); }
+  .chat-log .line.peer { color: var(--ink); }
+  .chat-log .line.peer::before { content: "peer› "; color: var(--amber); }
 
-    .error {
-      color: #ef4444;
-      font-weight: 600;
-    }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } }
 
-    .loading {
-      color: #667eea;
-      font-style: italic;
-    }
+  .field-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-dim); margin-bottom: 5px; }
 
-    .identity-card {
-      background: #f9fafb;
-      border: 1px solid #e5e7eb;
-      border-radius: 6px;
-      padding: 12px;
-      margin-bottom: 10px;
-      font-size: 12px;
-    }
-
-    .identity-card strong {
-      color: #667eea;
-    }
-
-    .pubkey {
-      font-family: 'Monaco', 'Courier New', monospace;
-      background: white;
-      padding: 4px 8px;
-      border-radius: 3px;
-      display: inline-block;
-      margin-top: 4px;
-      max-width: 100%;
-      overflow-x: auto;
-    }
-  </style>
+  code.small { font-size: 11px; color: var(--ink-dim); }
+</style>
 </head>
 <body>
-  <div class="container">
-    <h1>🌐 Nostr WebRTC Mesh</h1>
-    <p class="subtitle">Decentralized peer-to-peer networking. Running in your browser.</p>
 
-    <!-- Key Generation -->
-    <div class="section">
-      <h2>Generate Identity</h2>
-      <button onclick="generateIdentity()">Generate New Key Pair</button>
-      <div id="identity-output" class="output" style="display: none;"></div>
+<header>
+  <h1><span class="dot">●</span> Coralie — live test bed</h1>
+  <p>
+    Exercises the real implementations end to end in your browser: key generation and
+    NIP-44 encryption (<code class="small">Signer</code>), live WebSocket connections to
+    public Nostr relays (<code class="small">RelaySocket</code> / <code class="small">RelaySession</code>),
+    an encrypted signalling channel (<code class="small">SignallingClient</code>), and a real
+    WebRTC handshake + data channel (<code class="small">Initiator</code> /
+    <code class="small">Answerer</code> / <code class="small">PeerLink</code>). No orchestrator yet —
+    that's Phase 4 — so the offer/answer relay below is wired by hand in this page's script.
+  </p>
+</header>
+
+<main>
+
+  <!-- 1. Identity -->
+  <section class="panel">
+    <h2>01 · Identity</h2>
+    <p class="sub">Generates a fresh keypair via <code class="small">LiveSigner.generate()</code>. No persistence — reload for a new one.</p>
+    <div class="row">
+      <button id="btn-generate-identity">Generate identity</button>
+      <div class="grow pubkey mine" id="my-pubkey">— not generated yet —</div>
     </div>
+  </section>
 
-    <!-- Signing -->
-    <div class="section">
-      <h2>Sign & Verify</h2>
-      <button onclick="signEvent()">Sign Nostr Event</button>
-      <div id="signing-output" class="output" style="display: none;"></div>
+  <!-- 2. Relay connectivity -->
+  <section class="panel">
+    <h2>02 · Relay connectivity</h2>
+    <p class="sub">Live <code class="small">LiveRelaySocket</code> state per default relay. Reconnects with backoff on drop.</p>
+    <div class="row">
+      <button id="btn-connect-relays">Connect to relays</button>
+      <button id="btn-disconnect-relays" disabled>Disconnect</button>
     </div>
+    <div class="relay-list" id="relay-list" style="margin-top: 12px;"></div>
+  </section>
 
-    <!-- Encryption -->
-    <div class="section">
-      <h2>Encryption Demo</h2>
-      <button onclick="encryptionDemo()">Encrypt Message (Alice → Bob)</button>
-      <div id="encryption-output" class="output" style="display: none;"></div>
+  <!-- 3. NIP-44 playground -->
+  <section class="panel">
+    <h2>03 · NIP-44 playground</h2>
+    <p class="sub">Two local identities encrypt/decrypt a message via a shared conversation key. All real crypto, no network.</p>
+    <div class="row">
+      <input type="text" id="nip44-input" value="the mesh gathers at midnight" />
+      <button id="btn-nip44-run">Encrypt → decrypt</button>
     </div>
+    <div class="log" id="nip44-log" style="margin-top: 10px;"></div>
+  </section>
 
-    <!-- Clear -->
-    <div class="section">
-      <button onclick="clearAll()" style="background: #999;">Clear Output</button>
+  <!-- 4. Peer connect (signalling + WebRTC) -->
+  <section class="panel">
+    <h2>04 · Connect to a peer</h2>
+    <p class="sub">
+      Paste another tab's (or another person's) pubkey from panel 01. This tests the encrypted
+      signalling exchange over real relays, then a real WebRTC handshake (STUN, non-trickle ICE).
+      Open this page in two tabs to try it against yourself.
+    </p>
+    <div class="row">
+      <input type="text" id="peer-pubkey" placeholder="peer pubkey (hex)" />
+      <button id="btn-connect-peer" disabled>Connect</button>
     </div>
-  </div>
+    <div class="row">
+      <span class="field-label" style="margin:0;">status:</span>
+      <span id="peer-status" class="state-text">idle</span>
+    </div>
+    <div class="log" id="peer-log" style="margin-top: 10px;"></div>
+  </section>
 
-  <!-- Load from jsDelivr CDN -->
-  <script src="../dist/index.global.js"></script>
+  <!-- 5. Chat over the data channel -->
+  <section class="panel">
+    <h2>05 · Chat (data channel)</h2>
+    <p class="sub">Enabled once the peer connection above reaches <code class="small">Connected</code>. Raw bytes over the real <code class="small">PeerLink</code>.</p>
+    <div class="log chat-log" id="chat-log"></div>
+    <div class="row" style="margin-top: 10px;">
+      <input type="text" id="chat-input" placeholder="message" disabled />
+      <button id="btn-chat-send" disabled>Send</button>
+    </div>
+  </section>
 
-  <script>
-    const { Signer, createStateFlow } = CoralieCore
+</main>
 
-    // Store state
-    let identities = []
+<!-- Local build of the package -->
+<script src="../dist/index.global.js"></script>
+<script>
+  // Ensure CoralieCore is on window (IIFE creates var CoralieCore but we need it global)
+  if (typeof CoralieCore !== 'undefined') {
+    window.CoralieCore = CoralieCore;
+  }
+</script>
+<script>
+(function () {
+  const {
+    LiveSigner,
+    LiveRelaySocket,
+    LiveRelaySession,
+    LiveNostrSignallingClient,
+    LiveInitiator,
+    LiveAnswerer,
+    createLivePeerConnectionFactory,
+    RelaySocketState,
+    LinkState,
+    DEFAULT_MESH_ENDPOINTS,
+  } = window.CoralieCore;
 
-    function log(elementId, message, type = 'info') {
-      const el = document.getElementById(elementId)
-      el.style.display = 'block'
+  // ---------- small DOM helpers ----------
+  const $ = (id) => document.getElementById(id);
+  function log(elId, text, cls) {
+    const el = $(elId);
+    const line = document.createElement('div');
+    line.className = 'line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+  }
+  function stateClass(state) {
+    return String(state).toLowerCase();
+  }
 
-      const timestamp = new Date().toLocaleTimeString()
-      const className = type === 'success' ? 'success' : type === 'error' ? 'error' : ''
-      const line = `<div><span style="color: #999;">[${timestamp}]</span> <span class="${className}">${message}</span></div>`
+  // ---------- 01. Identity ----------
+  let mySigner = null;
 
-      el.innerHTML = el.innerHTML + line
-      el.scrollTop = el.scrollHeight
+  $('btn-generate-identity').addEventListener('click', () => {
+    mySigner = LiveSigner.generate();
+    $('my-pubkey').textContent = mySigner.pubkeyHex;
+    $('btn-connect-peer').disabled = false;
+  });
+
+  // ---------- 02. Relay connectivity ----------
+  let relaySockets = [];
+
+  function renderRelayRow(url) {
+    const row = document.createElement('div');
+    row.className = 'relay-row';
+    row.innerHTML =
+      '<span class="dot" data-role="dot"></span>' +
+      '<span class="url">' + url + '</span>' +
+      '<span class="state state-text" data-role="state">—</span>';
+    $('relay-list').appendChild(row);
+    return row;
+  }
+
+  $('btn-connect-relays').addEventListener('click', () => {
+    $('relay-list').innerHTML = '';
+    $('btn-connect-relays').disabled = true;
+    $('btn-disconnect-relays').disabled = false;
+
+    relaySockets = DEFAULT_MESH_ENDPOINTS.relayUrls.map((url) => {
+      const row = renderRelayRow(url);
+      const dot = row.querySelector('[data-role="dot"]');
+      const stateEl = row.querySelector('[data-role="state"]');
+      const socket = new LiveRelaySocket(url);
+      socket.state.subscribe((state) => {
+        const cls = stateClass(state);
+        dot.className = 'dot ' + cls;
+        stateEl.className = 'state state-text ' + cls;
+        stateEl.textContent = state;
+      });
+      return socket;
+    });
+  });
+
+  $('btn-disconnect-relays').addEventListener('click', () => {
+    relaySockets.forEach((s) => s.close());
+    relaySockets = [];
+    $('btn-connect-relays').disabled = false;
+    $('btn-disconnect-relays').disabled = true;
+  });
+
+  // ---------- 03. NIP-44 playground ----------
+  $('btn-nip44-run').addEventListener('click', () => {
+    const logId = 'nip44-log';
+    $(logId).innerHTML = '';
+    try {
+      const alice = LiveSigner.generate();
+      const bob = LiveSigner.generate();
+      const plaintext = $('nip44-input').value || '';
+
+      log(logId, 'alice: ' + alice.pubkeyHex);
+      log(logId, 'bob:   ' + bob.pubkeyHex);
+
+      const convoA = alice.getConvoKey(bob.pubkeyHex);
+      const convoB = bob.getConvoKey(alice.pubkeyHex);
+      log(logId, 'convo keys match: ' + (Buffer_equal(convoA, convoB) ? 'yes' : 'NO'), 'ok');
+
+      const ciphertext = alice.encryptNip44(plaintext, convoA);
+      log(logId, 'ciphertext: ' + ciphertext);
+
+      const decrypted = bob.decryptNip44(ciphertext, convoB);
+      log(logId, 'decrypted:  ' + decrypted, decrypted === plaintext ? 'ok' : 'err');
+    } catch (e) {
+      log(logId, 'error: ' + e.message, 'err');
+    }
+  });
+
+  function Buffer_equal(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  // ---------- 04 + 05. Peer connect + chat ----------
+  let signallingClient = null;
+  let initiator = null;
+  let answerer = null;
+  let peerLink = null;
+  let peerLogId = 'peer-log';
+
+  function setPeerStatus(text, cls) {
+    const el = $('peer-status');
+    el.textContent = text;
+    el.className = 'state-text ' + (cls || '');
+  }
+
+  function ensureSignallingClient() {
+    if (signallingClient) return signallingClient;
+    signallingClient = new LiveNostrSignallingClient(mySigner, DEFAULT_MESH_ENDPOINTS.relayUrls);
+    signallingClient.inbound.subscribe((msg) => handleInbound(msg));
+    return signallingClient;
+  }
+
+  async function handleInbound(msg) {
+    let envelope;
+    try {
+      envelope = JSON.parse(msg.payload);
+    } catch {
+      return; // not one of ours, ignore
     }
 
-    function clearAll() {
-      document.getElementById('identity-output').innerHTML = ''
-      document.getElementById('signing-output').innerHTML = ''
-      document.getElementById('encryption-output').innerHTML = ''
-      document.getElementById('identity-output').style.display = 'none'
-      document.getElementById('signing-output').style.display = 'none'
-      document.getElementById('encryption-output').style.display = 'none'
-      identities = []
+    if (envelope.type === 'offer') {
+      log(peerLogId, 'received offer from ' + msg.fromPubkeyHex);
+      answerer = new LiveAnswerer({ peerConnectionFactory: createLivePeerConnectionFactory({ iceServers: DEFAULT_MESH_ENDPOINTS.iceServers }) });
+      wireLinkState(answerer, msg.fromPubkeyHex);
+      const answer = await answerer.createAnswer({ type: 'offer', sdp: envelope.sdp });
+      signallingClient.send(msg.fromPubkeyHex, JSON.stringify({ type: 'answer', sdp: answer.sdp }));
+      log(peerLogId, 'sent answer to ' + msg.fromPubkeyHex);
+    } else if (envelope.type === 'answer' && initiator) {
+      log(peerLogId, 'received answer from ' + msg.fromPubkeyHex);
+      await initiator.acceptAnswer({ type: 'answer', sdp: envelope.sdp });
     }
+  }
 
-    function generateIdentity() {
-      try {
-        const signer = Signer.generate()
-        identities.push(signer)
-
-        const html = `
-          <div class="identity-card">
-            <strong>Identity #${identities.length}</strong><br>
-            <strong>Public Key:</strong><br>
-            <div class="pubkey">${signer.pubkeyHex}</div>
-          </div>
-        `
-
-        log('identity-output', html, 'success')
-        log('identity-output', `✓ Generated identity #${identities.length} (total: ${identities.length})`, 'success')
-      } catch (err) {
-        log('identity-output', `✗ Error: ${err.message}`, 'error')
+  function wireLinkState(side, peerPubkey) {
+    side.state.subscribe((state) => {
+      setPeerStatus(state, stateClass(state));
+      log(peerLogId, 'state → ' + state);
+      if (state === LinkState.Connected && side.peerLink) {
+        attachPeerLink(side.peerLink, peerPubkey);
       }
-    }
+    });
+  }
 
-    function signEvent() {
-      try {
-        if (identities.length === 0) {
-          log('signing-output', 'Generate an identity first!', 'error')
-          return
-        }
+  function attachPeerLink(link, peerPubkey) {
+    peerLink = link;
+    $('chat-input').disabled = false;
+    $('btn-chat-send').disabled = false;
+    $('chat-log').innerHTML = '';
+    log(peerLogId, 'data channel open with ' + peerPubkey, 'ok');
 
-        const signer = identities[0]
-        const event = signer.sign({
-          pubkey: signer.pubkeyHex,
-          created_at: Math.floor(Date.now() / 1000),
-          kind: 1,
-          tags: [],
-          content: 'Hello from the mesh! 🚀'
-        })
+    link.incomingBytes.subscribe((bytes) => {
+      const text = new TextDecoder().decode(bytes);
+      log('chat-log', text, 'peer');
+    });
 
-        const isValid = signer.verify(event)
-
-        log('signing-output', `<strong>Event ID:</strong> ${event.id}`, 'success')
-        log('signing-output', `<strong>Signature:</strong> ${event.sig.slice(0, 32)}...`, 'success')
-        log('signing-output', `<strong>Verified:</strong> ${isValid ? '✓ Yes' : '✗ No'}`, isValid ? 'success' : 'error')
-      } catch (err) {
-        log('signing-output', `✗ Error: ${err.message}`, 'error')
+    link.state.subscribe((state) => {
+      if (state === 'closed') {
+        $('chat-input').disabled = true;
+        $('btn-chat-send').disabled = true;
+        log(peerLogId, 'data channel closed');
       }
+    });
+  }
+
+  $('btn-connect-peer').addEventListener('click', async () => {
+    const peerPubkey = $('peer-pubkey').value.trim();
+    if (!mySigner) {
+      log(peerLogId, 'generate an identity first (panel 01)', 'err');
+      return;
+    }
+    if (!/^[0-9a-f]{64}$/i.test(peerPubkey)) {
+      log(peerLogId, 'peer pubkey must be 64 hex chars', 'err');
+      return;
     }
 
-    function encryptionDemo() {
-      try {
-        if (identities.length < 2) {
-          log('encryption-output', 'Generate at least 2 identities first!', 'error')
-          return
-        }
+    ensureSignallingClient();
+    setPeerStatus('offering', 'connecting');
+    $('btn-connect-peer').disabled = true;
 
-        const alice = identities[0]
-        const bob = identities[1]
+    initiator = new LiveInitiator({
+      peerConnectionFactory: createLivePeerConnectionFactory({ iceServers: DEFAULT_MESH_ENDPOINTS.iceServers }),
+    });
+    wireLinkState(initiator, peerPubkey);
 
-        const message = '🤫 This is a secret message!'
-        const encrypted = alice.encryptNip44(bob.pubkeyHex, message)
-        const decrypted = bob.decryptNip44(alice.pubkeyHex, encrypted)
+    const offer = await initiator.createOffer();
+    const result = signallingClient.send(peerPubkey, JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+    log(peerLogId, result.ok ? 'sent offer to ' + peerPubkey : 'failed to send offer: ' + result.error.message, result.ok ? 'ok' : 'err');
+  });
 
-        log('encryption-output', `<strong>Original Message:</strong> ${message}`, 'success')
-        log('encryption-output', `<strong>Encrypted (NIP-44):</strong> ${encrypted.slice(0, 48)}...`, 'info')
-        log('encryption-output', `<strong>Decrypted by Bob:</strong> ${decrypted}`, 'success')
-        log('encryption-output', `<strong>Decryption Match:</strong> ${decrypted === message ? '✓ Yes' : '✗ No'}`, decrypted === message ? 'success' : 'error')
-      } catch (err) {
-        log('encryption-output', `✗ Error: ${err.message}`, 'error')
-      }
-    }
+  $('btn-chat-send').addEventListener('click', () => {
+    const input = $('chat-input');
+    const text = input.value;
+    if (!text || !peerLink) return;
+    peerLink.send(new TextEncoder().encode(text));
+    log('chat-log', text, 'me');
+    input.value = '';
+  });
+  $('chat-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('btn-chat-send').click();
+  });
+})();
+</script>
 
-    // Show initial message
-    log('identity-output', '<span class="loading">Ready. Click "Generate Identity" to start.</span>', 'info')
-  </script>
 </body>
 </html>

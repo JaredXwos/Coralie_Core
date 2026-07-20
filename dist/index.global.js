@@ -23,10 +23,191 @@ var CoralieCore = (() => {
   // src/index.ts
   var index_exports = {};
   __export(index_exports, {
-    Signer: () => Signer,
+    DEFAULT_MESH_ENDPOINTS: () => DEFAULT_MESH_ENDPOINTS,
+    LinkState: () => LinkState,
+    LiveAnswerer: () => LiveAnswerer,
+    LiveDedupingEventSink: () => LiveDedupingEventSink,
+    LiveInitiator: () => LiveInitiator,
+    LiveNostrSignallingClient: () => LiveNostrSignallingClient,
+    LivePeerConnection: () => LivePeerConnection,
+    LivePeerLink: () => LivePeerLink,
+    LiveRelaySession: () => LiveRelaySession,
+    LiveRelaySocket: () => LiveRelaySocket,
+    LiveSharedFlow: () => LiveSharedFlow,
+    LiveSigner: () => LiveSigner,
+    LiveStateFlow: () => LiveStateFlow,
+    MockAnswerer: () => MockAnswerer,
+    MockDataChannel: () => MockDataChannel,
+    MockEventSink: () => MockEventSink,
+    MockInitiator: () => MockInitiator,
+    MockPeerConnection: () => MockPeerConnection,
+    MockPeerLink: () => MockPeerLink,
+    MockRelaySession: () => MockRelaySession,
+    MockRelaySocket: () => MockRelaySocket,
+    MockSharedFlow: () => MockSharedFlow,
+    MockSignallingClient: () => MockSignallingClient,
+    MockSigner: () => MockSigner,
+    MockStateFlow: () => MockStateFlow,
+    RelaySocketState: () => RelaySocketState,
+    SIGNALLING_KIND: () => SIGNALLING_KIND,
+    createLinkedMockPeerConnections: () => createLinkedMockPeerConnections,
+    createLivePeerConnectionFactory: () => createLivePeerConnectionFactory,
+    createMockSharedFlow: () => createMockSharedFlow,
+    createMockStateFlow: () => createMockStateFlow,
     createSharedFlow: () => createSharedFlow,
-    createStateFlow: () => createStateFlow
+    createStateFlow: () => createStateFlow,
+    err: () => err,
+    exponentialBackoff: () => exponentialBackoff,
+    ok: () => ok,
+    pubkeyForSeed: () => pubkeyForSeed
   });
+
+  // src/core/types.ts
+  var LinkState = /* @__PURE__ */ ((LinkState2) => {
+    LinkState2["Initiating"] = "Initiating";
+    LinkState2["Offering"] = "Offering";
+    LinkState2["Answering"] = "Answering";
+    LinkState2["Connecting"] = "Connecting";
+    LinkState2["Connected"] = "Connected";
+    LinkState2["Failed"] = "Failed";
+    LinkState2["Closed"] = "Closed";
+    return LinkState2;
+  })(LinkState || {});
+  function ok(value) {
+    return { ok: true, value };
+  }
+  function err(error) {
+    return { ok: false, error };
+  }
+
+  // src/mesh-endpoints.ts
+  var DEFAULT_MESH_ENDPOINTS = {
+    relayUrls: ["wss://relay.damus.io", "wss://nos.lol", "wss://nostr.oxtr.dev", "wss://purplerelay.com"],
+    iceServers: [
+      { urls: ["stun:stun.l.google.com:19302"] },
+      { urls: ["stun:stun1.l.google.com:19302"] },
+      { urls: ["stun:stun2.l.google.com:19302"] },
+      { urls: ["stun:stun3.l.google.com:19302"] },
+      { urls: ["stun:stun4.l.google.com:19302"] },
+      { urls: ["stun:stun.cloudflare.com:3478"] }
+    ]
+  };
+
+  // src/core/state-flow/state-flow.live.ts
+  var LiveStateFlow = class {
+    constructor(initial) {
+      this.listeners = /* @__PURE__ */ new Set();
+      this.current = initial;
+    }
+    get value() {
+      return this.current;
+    }
+    set value(next) {
+      this.current = next;
+      for (const listener of this.listeners) listener(this.current);
+    }
+    subscribe(listener) {
+      this.listeners.add(listener);
+      listener(this.current);
+      return () => this.listeners.delete(listener);
+    }
+    asReadOnly() {
+      const self = this;
+      return {
+        get value() {
+          return self.value;
+        },
+        subscribe: (listener) => self.subscribe(listener)
+      };
+    }
+  };
+  function createStateFlow(initial) {
+    return new LiveStateFlow(initial);
+  }
+
+  // src/core/state-flow/state-flow.mock.ts
+  var MockStateFlow = class {
+    constructor(initial) {
+      this.listeners = /* @__PURE__ */ new Set();
+      this.current = initial;
+      this.history = [initial];
+    }
+    get value() {
+      return this.current;
+    }
+    set value(next) {
+      this.current = next;
+      this.history.push(next);
+      for (const listener of this.listeners) listener(this.current);
+    }
+    /** Number of currently-active subscribers. */
+    get listenerCount() {
+      return this.listeners.size;
+    }
+    subscribe(listener) {
+      this.listeners.add(listener);
+      listener(this.current);
+      return () => this.listeners.delete(listener);
+    }
+    asReadOnly() {
+      const self = this;
+      return {
+        get value() {
+          return self.value;
+        },
+        subscribe: (listener) => self.subscribe(listener)
+      };
+    }
+  };
+  function createMockStateFlow(initial) {
+    return new MockStateFlow(initial);
+  }
+
+  // src/core/shared-flow/shared-flow.live.ts
+  var LiveSharedFlow = class {
+    constructor() {
+      this.listeners = /* @__PURE__ */ new Set();
+    }
+    emit(value) {
+      for (const listener of this.listeners) listener(value);
+    }
+    subscribe(listener) {
+      this.listeners.add(listener);
+      return () => this.listeners.delete(listener);
+    }
+    asReadOnly() {
+      return { subscribe: (listener) => this.subscribe(listener) };
+    }
+  };
+  function createSharedFlow() {
+    return new LiveSharedFlow();
+  }
+
+  // src/core/shared-flow/shared-flow.mock.ts
+  var MockSharedFlow = class {
+    constructor() {
+      /** Every value ever emitted, in order. */
+      this.emissions = [];
+      this.listeners = /* @__PURE__ */ new Set();
+    }
+    emit(value) {
+      this.emissions.push(value);
+      for (const listener of this.listeners) listener(value);
+    }
+    get listenerCount() {
+      return this.listeners.size;
+    }
+    subscribe(listener) {
+      this.listeners.add(listener);
+      return () => this.listeners.delete(listener);
+    }
+    asReadOnly() {
+      return { subscribe: (listener) => this.subscribe(listener) };
+    }
+  };
+  function createMockSharedFlow() {
+    return new MockSharedFlow();
+  }
 
   // node_modules/@noble/hashes/utils.js
   function isBytes(a) {
@@ -681,7 +862,7 @@ var CoralieCore = (() => {
         return n;
       if (FpLegendre(Fp, n) !== 1)
         throw new Error("Cannot find square root");
-      let M2 = S;
+      let M = S;
       let c = Fp.mul(Fp.ONE, cc);
       let t = Fp.pow(n, Q);
       let R = Fp.pow(n, Q1div2);
@@ -693,12 +874,12 @@ var CoralieCore = (() => {
         while (!Fp.eql(t_tmp, Fp.ONE)) {
           i2++;
           t_tmp = Fp.sqr(t_tmp);
-          if (i2 === M2)
+          if (i2 === M)
             throw new Error("Cannot find square root");
         }
-        const exponent = _1n2 << BigInt(M2 - i2 - 1);
+        const exponent = _1n2 << BigInt(M - i2 - 1);
         const b = Fp.pow(c, exponent);
-        M2 = i2;
+        M = i2;
         c = Fp.sqr(b);
         t = Fp.mul(t, c);
         R = Fp.mul(R, b);
@@ -1459,8 +1640,8 @@ var CoralieCore = (() => {
         try {
           y = Fp.sqrt(y2);
         } catch (sqrtError) {
-          const err = sqrtError instanceof Error ? ": " + sqrtError.message : "";
-          throw new Error("bad point: is not on curve, sqrt error" + err);
+          const err2 = sqrtError instanceof Error ? ": " + sqrtError.message : "";
+          throw new Error("bad point: is not on curve, sqrt error" + err2);
         }
         assertCompressionIsSupported();
         const evenY = Fp.isOdd(y);
@@ -1738,15 +1919,15 @@ var CoralieCore = (() => {
         if (!Fn.isValidNot0(scalar))
           throw new Error("invalid scalar: out of range");
         let point, fake;
-        const mul3 = (n) => wnaf.cached(this, n, (p) => normalizeZ(_Point, p));
+        const mul = (n) => wnaf.cached(this, n, (p) => normalizeZ(_Point, p));
         if (endo2) {
           const { k1neg, k1, k2neg, k2 } = splitEndoScalarN(scalar);
-          const { p: k1p, f: k1f } = mul3(k1);
-          const { p: k2p, f: k2f } = mul3(k2);
+          const { p: k1p, f: k1f } = mul(k1);
+          const { p: k2p, f: k2f } = mul(k2);
           fake = k1f.add(k2f);
           point = finishEndo(endo2.beta, k1p, k2p, k1neg, k2neg);
         } else {
-          const { p, f } = mul3(scalar);
+          const { p, f } = mul(scalar);
           point = p;
           fake = f;
         }
@@ -2288,326 +2469,99 @@ var CoralieCore = (() => {
     };
   })();
 
-  // node_modules/@scure/base/index.js
-  function isBytes2(a) {
-    return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
-  }
-  function abytes2(b) {
-    if (!isBytes2(b))
-      throw new Error("Uint8Array expected");
-  }
-  function isArrayOf(isString, arr) {
-    if (!Array.isArray(arr))
+  // node_modules/nostr-tools/lib/esm/pure.js
+  var verifiedSymbol = /* @__PURE__ */ Symbol("verified");
+  var isRecord = (obj) => obj instanceof Object;
+  function validateEvent(event) {
+    if (!isRecord(event))
       return false;
-    if (arr.length === 0)
-      return true;
-    if (isString) {
-      return arr.every((item) => typeof item === "string");
-    } else {
-      return arr.every((item) => Number.isSafeInteger(item));
+    if (typeof event.kind !== "number")
+      return false;
+    if (typeof event.content !== "string")
+      return false;
+    if (typeof event.created_at !== "number")
+      return false;
+    if (typeof event.pubkey !== "string")
+      return false;
+    if (!event.pubkey.match(/^[a-f0-9]{64}$/))
+      return false;
+    if (!Array.isArray(event.tags))
+      return false;
+    for (let i2 = 0; i2 < event.tags.length; i2++) {
+      let tag = event.tags[i2];
+      if (!Array.isArray(tag))
+        return false;
+      for (let j = 0; j < tag.length; j++) {
+        if (typeof tag[j] !== "string")
+          return false;
+      }
     }
-  }
-  function afn(input) {
-    if (typeof input !== "function")
-      throw new Error("function expected");
     return true;
   }
-  function astr(label, input) {
-    if (typeof input !== "string")
-      throw new Error(`${label}: string expected`);
-    return true;
-  }
-  function anumber2(n) {
-    if (!Number.isSafeInteger(n))
-      throw new Error(`invalid integer: ${n}`);
-  }
-  function aArr(input) {
-    if (!Array.isArray(input))
-      throw new Error("array expected");
-  }
-  function astrArr(label, input) {
-    if (!isArrayOf(true, input))
-      throw new Error(`${label}: array of strings expected`);
-  }
-  function anumArr(label, input) {
-    if (!isArrayOf(false, input))
-      throw new Error(`${label}: array of numbers expected`);
-  }
-  // @__NO_SIDE_EFFECTS__
-  function chain(...args) {
-    const id = (a) => a;
-    const wrap = (a, b) => (c) => a(b(c));
-    const encode = args.map((x) => x.encode).reduceRight(wrap, id);
-    const decode2 = args.map((x) => x.decode).reduce(wrap, id);
-    return { encode, decode: decode2 };
-  }
-  // @__NO_SIDE_EFFECTS__
-  function alphabet(letters) {
-    const lettersA = typeof letters === "string" ? letters.split("") : letters;
-    const len = lettersA.length;
-    astrArr("alphabet", lettersA);
-    const indexes = new Map(lettersA.map((l, i2) => [l, i2]));
-    return {
-      encode: (digits) => {
-        aArr(digits);
-        return digits.map((i2) => {
-          if (!Number.isSafeInteger(i2) || i2 < 0 || i2 >= len)
-            throw new Error(`alphabet.encode: digit index outside alphabet "${i2}". Allowed: ${letters}`);
-          return lettersA[i2];
-        });
-      },
-      decode: (input) => {
-        aArr(input);
-        return input.map((letter) => {
-          astr("alphabet.decode", letter);
-          const i2 = indexes.get(letter);
-          if (i2 === void 0)
-            throw new Error(`Unknown letter: "${letter}". Allowed: ${letters}`);
-          return i2;
-        });
-      }
-    };
-  }
-  // @__NO_SIDE_EFFECTS__
-  function join(separator = "") {
-    astr("join", separator);
-    return {
-      encode: (from) => {
-        astrArr("join.decode", from);
-        return from.join(separator);
-      },
-      decode: (to) => {
-        astr("join.decode", to);
-        return to.split(separator);
-      }
-    };
-  }
-  // @__NO_SIDE_EFFECTS__
-  function padding(bits, chr = "=") {
-    anumber2(bits);
-    astr("padding", chr);
-    return {
-      encode(data) {
-        astrArr("padding.encode", data);
-        while (data.length * bits % 8)
-          data.push(chr);
-        return data;
-      },
-      decode(input) {
-        astrArr("padding.decode", input);
-        let end = input.length;
-        if (end * bits % 8)
-          throw new Error("padding: invalid, string should have whole number of bytes");
-        for (; end > 0 && input[end - 1] === chr; end--) {
-          const last = end - 1;
-          const byte = last * bits;
-          if (byte % 8 === 0)
-            throw new Error("padding: invalid, string has too much padding");
-        }
-        return input.slice(0, end);
-      }
-    };
-  }
-  var gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
-  var radix2carry = /* @__NO_SIDE_EFFECTS__ */ (from, to) => from + (to - gcd(from, to));
-  var powers = /* @__PURE__ */ (() => {
-    let res = [];
-    for (let i2 = 0; i2 < 40; i2++)
-      res.push(2 ** i2);
-    return res;
-  })();
-  function convertRadix2(data, from, to, padding2) {
-    aArr(data);
-    if (from <= 0 || from > 32)
-      throw new Error(`convertRadix2: wrong from=${from}`);
-    if (to <= 0 || to > 32)
-      throw new Error(`convertRadix2: wrong to=${to}`);
-    if (/* @__PURE__ */ radix2carry(from, to) > 32) {
-      throw new Error(`convertRadix2: carry overflow from=${from} to=${to} carryBits=${/* @__PURE__ */ radix2carry(from, to)}`);
+  var utf8Decoder = new TextDecoder("utf-8");
+  var utf8Encoder = new TextEncoder();
+  var JS = class {
+    generateSecretKey() {
+      return schnorr.utils.randomSecretKey();
     }
-    let carry = 0;
-    let pos = 0;
-    const max = powers[from];
-    const mask = powers[to] - 1;
-    const res = [];
-    for (const n of data) {
-      anumber2(n);
-      if (n >= max)
-        throw new Error(`convertRadix2: invalid data word=${n} from=${from}`);
-      carry = carry << from | n;
-      if (pos + from > 32)
-        throw new Error(`convertRadix2: carry overflow pos=${pos} from=${from}`);
-      pos += from;
-      for (; pos >= to; pos -= to)
-        res.push((carry >> pos - to & mask) >>> 0);
-      const pow = powers[pos];
-      if (pow === void 0)
-        throw new Error("invalid carry");
-      carry &= pow - 1;
+    getPublicKey(secretKey) {
+      return bytesToHex(schnorr.getPublicKey(secretKey));
     }
-    carry = carry << to - pos & mask;
-    if (!padding2 && pos >= from)
-      throw new Error("Excess padding");
-    if (!padding2 && carry > 0)
-      throw new Error(`Non-zero padding: ${carry}`);
-    if (padding2 && pos > 0)
-      res.push(carry >>> 0);
-    return res;
-  }
-  // @__NO_SIDE_EFFECTS__
-  function radix2(bits, revPadding = false) {
-    anumber2(bits);
-    if (bits <= 0 || bits > 32)
-      throw new Error("radix2: bits should be in (0..32]");
-    if (/* @__PURE__ */ radix2carry(8, bits) > 32 || /* @__PURE__ */ radix2carry(bits, 8) > 32)
-      throw new Error("radix2: carry overflow");
-    return {
-      encode: (bytes) => {
-        if (!isBytes2(bytes))
-          throw new Error("radix2.encode input should be Uint8Array");
-        return convertRadix2(Array.from(bytes), 8, bits, !revPadding);
-      },
-      decode: (digits) => {
-        anumArr("radix2.decode", digits);
-        return Uint8Array.from(convertRadix2(digits, bits, 8, revPadding));
-      }
-    };
-  }
-  function unsafeWrapper(fn) {
-    afn(fn);
-    return function(...args) {
+    finalizeEvent(t, secretKey) {
+      const event = t;
+      event.pubkey = bytesToHex(schnorr.getPublicKey(secretKey));
+      event.id = getEventHash(event);
+      event.sig = bytesToHex(schnorr.sign(hexToBytes(getEventHash(event)), secretKey));
+      event[verifiedSymbol] = true;
+      return event;
+    }
+    verifyEvent(event) {
+      if (typeof event[verifiedSymbol] === "boolean")
+        return event[verifiedSymbol];
       try {
-        return fn.apply(null, args);
-      } catch (e) {
+        const hash = getEventHash(event);
+        if (hash !== event.id) {
+          event[verifiedSymbol] = false;
+          return false;
+        }
+        const valid = schnorr.verify(hexToBytes(event.sig), hexToBytes(hash), hexToBytes(event.pubkey));
+        event[verifiedSymbol] = valid;
+        return valid;
+      } catch (err2) {
+        event[verifiedSymbol] = false;
+        return false;
       }
-    };
-  }
-  var hasBase64Builtin = /* @__PURE__ */ (() => typeof Uint8Array.from([]).toBase64 === "function" && typeof Uint8Array.fromBase64 === "function")();
-  var decodeBase64Builtin = (s, isUrl) => {
-    astr("base64", s);
-    const re = isUrl ? /^[A-Za-z0-9=_-]+$/ : /^[A-Za-z0-9=+/]+$/;
-    const alphabet2 = isUrl ? "base64url" : "base64";
-    if (s.length > 0 && !re.test(s))
-      throw new Error("invalid base64");
-    return Uint8Array.fromBase64(s, { alphabet: alphabet2, lastChunkHandling: "strict" });
+    }
   };
-  var base64 = hasBase64Builtin ? {
-    encode(b) {
-      abytes2(b);
-      return b.toBase64();
-    },
-    decode(s) {
-      return decodeBase64Builtin(s, false);
-    }
-  } : /* @__PURE__ */ chain(/* @__PURE__ */ radix2(6), /* @__PURE__ */ alphabet("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"), /* @__PURE__ */ padding(6), /* @__PURE__ */ join(""));
-  var BECH_ALPHABET = /* @__PURE__ */ chain(/* @__PURE__ */ alphabet("qpzry9x8gf2tvdw0s3jn54khce6mua7l"), /* @__PURE__ */ join(""));
-  var POLYMOD_GENERATORS = [996825010, 642813549, 513874426, 1027748829, 705979059];
-  function bech32Polymod(pre) {
-    const b = pre >> 25;
-    let chk = (pre & 33554431) << 5;
-    for (let i2 = 0; i2 < POLYMOD_GENERATORS.length; i2++) {
-      if ((b >> i2 & 1) === 1)
-        chk ^= POLYMOD_GENERATORS[i2];
-    }
-    return chk;
+  function serializeEvent(evt) {
+    if (!validateEvent(evt))
+      throw new Error("can't serialize event with wrong or missing properties");
+    return JSON.stringify([0, evt.pubkey, evt.created_at, evt.kind, evt.tags, evt.content]);
   }
-  function bechChecksum(prefix, words, encodingConst = 1) {
-    const len = prefix.length;
-    let chk = 1;
-    for (let i2 = 0; i2 < len; i2++) {
-      const c = prefix.charCodeAt(i2);
-      if (c < 33 || c > 126)
-        throw new Error(`Invalid prefix (${prefix})`);
-      chk = bech32Polymod(chk) ^ c >> 5;
-    }
-    chk = bech32Polymod(chk);
-    for (let i2 = 0; i2 < len; i2++)
-      chk = bech32Polymod(chk) ^ prefix.charCodeAt(i2) & 31;
-    for (let v of words)
-      chk = bech32Polymod(chk) ^ v;
-    for (let i2 = 0; i2 < 6; i2++)
-      chk = bech32Polymod(chk);
-    chk ^= encodingConst;
-    return BECH_ALPHABET.encode(convertRadix2([chk % powers[30]], 30, 5, false));
+  function getEventHash(event) {
+    let eventHash = sha256(utf8Encoder.encode(serializeEvent(event)));
+    return bytesToHex(eventHash);
   }
-  // @__NO_SIDE_EFFECTS__
-  function genBech32(encoding) {
-    const ENCODING_CONST = encoding === "bech32" ? 1 : 734539939;
-    const _words = /* @__PURE__ */ radix2(5);
-    const fromWords = _words.decode;
-    const toWords = _words.encode;
-    const fromWordsUnsafe = unsafeWrapper(fromWords);
-    function encode(prefix, words, limit = 90) {
-      astr("bech32.encode prefix", prefix);
-      if (isBytes2(words))
-        words = Array.from(words);
-      anumArr("bech32.encode", words);
-      const plen = prefix.length;
-      if (plen === 0)
-        throw new TypeError(`Invalid prefix length ${plen}`);
-      const actualLength = plen + 7 + words.length;
-      if (limit !== false && actualLength > limit)
-        throw new TypeError(`Length ${actualLength} exceeds limit ${limit}`);
-      const lowered = prefix.toLowerCase();
-      const sum = bechChecksum(lowered, words, ENCODING_CONST);
-      return `${lowered}1${BECH_ALPHABET.encode(words)}${sum}`;
-    }
-    function decode2(str, limit = 90) {
-      astr("bech32.decode input", str);
-      const slen = str.length;
-      if (slen < 8 || limit !== false && slen > limit)
-        throw new TypeError(`invalid string length: ${slen} (${str}). Expected (8..${limit})`);
-      const lowered = str.toLowerCase();
-      if (str !== lowered && str !== str.toUpperCase())
-        throw new Error(`String must be lowercase or uppercase`);
-      const sepIndex = lowered.lastIndexOf("1");
-      if (sepIndex === 0 || sepIndex === -1)
-        throw new Error(`Letter "1" must be present between prefix and data only`);
-      const prefix = lowered.slice(0, sepIndex);
-      const data = lowered.slice(sepIndex + 1);
-      if (data.length < 6)
-        throw new Error("Data must be at least 6 characters long");
-      const words = BECH_ALPHABET.decode(data).slice(0, -6);
-      const sum = bechChecksum(prefix, words, ENCODING_CONST);
-      if (!data.endsWith(sum))
-        throw new Error(`Invalid checksum in ${str}: expected "${sum}"`);
-      return { prefix, words };
-    }
-    const decodeUnsafe = unsafeWrapper(decode2);
-    function decodeToBytes(str) {
-      const { prefix, words } = decode2(str, false);
-      return { prefix, words, bytes: fromWords(words) };
-    }
-    function encodeFromBytes(prefix, bytes) {
-      return encode(prefix, toWords(bytes));
-    }
-    return {
-      encode,
-      decode: decode2,
-      encodeFromBytes,
-      decodeToBytes,
-      decodeUnsafe,
-      fromWords,
-      fromWordsUnsafe,
-      toWords
-    };
-  }
-  var bech32 = /* @__PURE__ */ genBech32("bech32");
+  var i = new JS();
+  var generateSecretKey = i.generateSecretKey;
+  var getPublicKey = i.getPublicKey;
+  var finalizeEvent = i.finalizeEvent;
+  var verifyEvent = i.verifyEvent;
 
   // node_modules/@noble/ciphers/utils.js
-  function isBytes3(a) {
+  function isBytes2(a) {
     return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
   }
   function abool2(b) {
     if (typeof b !== "boolean")
       throw new Error(`boolean expected, not ${b}`);
   }
-  function anumber3(n) {
+  function anumber2(n) {
     if (!Number.isSafeInteger(n) || n < 0)
       throw new Error("positive integer expected, got " + n);
   }
-  function abytes3(value, length, title = "") {
-    const bytes = isBytes3(value);
+  function abytes2(value, length, title = "") {
+    const bytes = isBytes2(value);
     const len = value?.length;
     const needsLen = length !== void 0;
     if (!bytes || needsLen && len !== length) {
@@ -2625,7 +2579,7 @@ var CoralieCore = (() => {
       throw new Error("Hash#digest() has already been called");
   }
   function aoutput2(out, instance) {
-    abytes3(out, void 0, "output");
+    abytes2(out, void 0, "output");
     const min = instance.outputLen;
     if (out.length < min) {
       throw new Error("digestInto() expects output buffer of length at least " + min);
@@ -2643,15 +2597,6 @@ var CoralieCore = (() => {
     return new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
   }
   var isLE = /* @__PURE__ */ (() => new Uint8Array(new Uint32Array([287454020]).buffer)[0] === 68)();
-  function overlapBytes(a, b) {
-    return a.buffer === b.buffer && // best we can do, may fail with an obscure Proxy
-    a.byteOffset < b.byteOffset + b.byteLength && // a starts before b end
-    b.byteOffset < a.byteOffset + a.byteLength;
-  }
-  function complexOverlapBytes(input, output) {
-    if (overlapBytes(input, output) && input.byteOffset < output.byteOffset)
-      throw new Error("complex overlap of input and output is not supported");
-  }
   function checkOpts(defaults, opts) {
     if (opts == null || typeof opts !== "object")
       throw new Error("options must be defined");
@@ -2668,22 +2613,22 @@ var CoralieCore = (() => {
   }
   var wrapCipher = /* @__NO_SIDE_EFFECTS__ */ (params, constructor) => {
     function wrappedCipher(key, ...args) {
-      abytes3(key, void 0, "key");
+      abytes2(key, void 0, "key");
       if (!isLE)
         throw new Error("Non little-endian hardware is not yet supported");
       if (params.nonceLength !== void 0) {
         const nonce = args[0];
-        abytes3(nonce, params.varSizeNonce ? void 0 : params.nonceLength, "nonce");
+        abytes2(nonce, params.varSizeNonce ? void 0 : params.nonceLength, "nonce");
       }
       const tagl = params.tagLength;
       if (tagl && args[1] !== void 0)
-        abytes3(args[1], void 0, "AAD");
+        abytes2(args[1], void 0, "AAD");
       const cipher = constructor(key, ...args);
       const checkOutput = (fnLength, output) => {
         if (output !== void 0) {
           if (fnLength !== 2)
             throw new Error("cipher output not supported");
-          abytes3(output, void 0, "output");
+          abytes2(output, void 0, "output");
         }
       };
       let called = false;
@@ -2692,12 +2637,12 @@ var CoralieCore = (() => {
           if (called)
             throw new Error("cannot encrypt() twice with same key + nonce");
           called = true;
-          abytes3(data);
+          abytes2(data);
           checkOutput(cipher.encrypt.length, output);
           return cipher.encrypt(data, output);
         },
         decrypt(data, output) {
-          abytes3(data);
+          abytes2(data);
           if (tagl && data.length < tagl)
             throw new Error('"ciphertext" expected length bigger than tagLength=' + tagl);
           checkOutput(cipher.decrypt.length, output);
@@ -2732,363 +2677,6 @@ var CoralieCore = (() => {
   function copyBytes2(bytes) {
     return Uint8Array.from(bytes);
   }
-
-  // node_modules/@noble/ciphers/aes.js
-  var BLOCK_SIZE = 16;
-  var POLY = 283;
-  function validateKeyLength(key) {
-    if (![16, 24, 32].includes(key.length))
-      throw new Error('"aes key" expected Uint8Array of length 16/24/32, got length=' + key.length);
-  }
-  function mul2(n) {
-    return n << 1 ^ POLY & -(n >> 7);
-  }
-  function mul(a, b) {
-    let res = 0;
-    for (; b > 0; b >>= 1) {
-      res ^= a & -(b & 1);
-      a = mul2(a);
-    }
-    return res;
-  }
-  var sbox = /* @__PURE__ */ (() => {
-    const t = new Uint8Array(256);
-    for (let i2 = 0, x = 1; i2 < 256; i2++, x ^= mul2(x))
-      t[i2] = x;
-    const box = new Uint8Array(256);
-    box[0] = 99;
-    for (let i2 = 0; i2 < 255; i2++) {
-      let x = t[255 - i2];
-      x |= x << 8;
-      box[t[i2]] = (x ^ x >> 4 ^ x >> 5 ^ x >> 6 ^ x >> 7 ^ 99) & 255;
-    }
-    clean2(t);
-    return box;
-  })();
-  var invSbox = /* @__PURE__ */ sbox.map((_, j) => sbox.indexOf(j));
-  var rotr32_8 = (n) => n << 24 | n >>> 8;
-  var rotl32_8 = (n) => n << 8 | n >>> 24;
-  function genTtable(sbox2, fn) {
-    if (sbox2.length !== 256)
-      throw new Error("Wrong sbox length");
-    const T0 = new Uint32Array(256).map((_, j) => fn(sbox2[j]));
-    const T1 = T0.map(rotl32_8);
-    const T2 = T1.map(rotl32_8);
-    const T3 = T2.map(rotl32_8);
-    const T01 = new Uint32Array(256 * 256);
-    const T23 = new Uint32Array(256 * 256);
-    const sbox22 = new Uint16Array(256 * 256);
-    for (let i2 = 0; i2 < 256; i2++) {
-      for (let j = 0; j < 256; j++) {
-        const idx = i2 * 256 + j;
-        T01[idx] = T0[i2] ^ T1[j];
-        T23[idx] = T2[i2] ^ T3[j];
-        sbox22[idx] = sbox2[i2] << 8 | sbox2[j];
-      }
-    }
-    return { sbox: sbox2, sbox2: sbox22, T0, T1, T2, T3, T01, T23 };
-  }
-  var tableEncoding = /* @__PURE__ */ genTtable(sbox, (s) => mul(s, 3) << 24 | s << 16 | s << 8 | mul(s, 2));
-  var tableDecoding = /* @__PURE__ */ genTtable(invSbox, (s) => mul(s, 11) << 24 | mul(s, 13) << 16 | mul(s, 9) << 8 | mul(s, 14));
-  var xPowers = /* @__PURE__ */ (() => {
-    const p = new Uint8Array(16);
-    for (let i2 = 0, x = 1; i2 < 16; i2++, x = mul2(x))
-      p[i2] = x;
-    return p;
-  })();
-  function expandKeyLE(key) {
-    abytes3(key);
-    const len = key.length;
-    validateKeyLength(key);
-    const { sbox2 } = tableEncoding;
-    const toClean = [];
-    if (!isAligned32(key))
-      toClean.push(key = copyBytes2(key));
-    const k32 = u32(key);
-    const Nk = k32.length;
-    const subByte = (n) => applySbox(sbox2, n, n, n, n);
-    const xk = new Uint32Array(len + 28);
-    xk.set(k32);
-    for (let i2 = Nk; i2 < xk.length; i2++) {
-      let t = xk[i2 - 1];
-      if (i2 % Nk === 0)
-        t = subByte(rotr32_8(t)) ^ xPowers[i2 / Nk - 1];
-      else if (Nk > 6 && i2 % Nk === 4)
-        t = subByte(t);
-      xk[i2] = xk[i2 - Nk] ^ t;
-    }
-    clean2(...toClean);
-    return xk;
-  }
-  function expandKeyDecLE(key) {
-    const encKey = expandKeyLE(key);
-    const xk = encKey.slice();
-    const Nk = encKey.length;
-    const { sbox2 } = tableEncoding;
-    const { T0, T1, T2, T3 } = tableDecoding;
-    for (let i2 = 0; i2 < Nk; i2 += 4) {
-      for (let j = 0; j < 4; j++)
-        xk[i2 + j] = encKey[Nk - i2 - 4 + j];
-    }
-    clean2(encKey);
-    for (let i2 = 4; i2 < Nk - 4; i2++) {
-      const x = xk[i2];
-      const w = applySbox(sbox2, x, x, x, x);
-      xk[i2] = T0[w & 255] ^ T1[w >>> 8 & 255] ^ T2[w >>> 16 & 255] ^ T3[w >>> 24];
-    }
-    return xk;
-  }
-  function apply0123(T01, T23, s0, s1, s2, s3) {
-    return T01[s0 << 8 & 65280 | s1 >>> 8 & 255] ^ T23[s2 >>> 8 & 65280 | s3 >>> 24 & 255];
-  }
-  function applySbox(sbox2, s0, s1, s2, s3) {
-    return sbox2[s0 & 255 | s1 & 65280] | sbox2[s2 >>> 16 & 255 | s3 >>> 16 & 65280] << 16;
-  }
-  function encrypt(xk, s0, s1, s2, s3) {
-    const { sbox2, T01, T23 } = tableEncoding;
-    let k = 0;
-    s0 ^= xk[k++], s1 ^= xk[k++], s2 ^= xk[k++], s3 ^= xk[k++];
-    const rounds = xk.length / 4 - 2;
-    for (let i2 = 0; i2 < rounds; i2++) {
-      const t02 = xk[k++] ^ apply0123(T01, T23, s0, s1, s2, s3);
-      const t12 = xk[k++] ^ apply0123(T01, T23, s1, s2, s3, s0);
-      const t22 = xk[k++] ^ apply0123(T01, T23, s2, s3, s0, s1);
-      const t32 = xk[k++] ^ apply0123(T01, T23, s3, s0, s1, s2);
-      s0 = t02, s1 = t12, s2 = t22, s3 = t32;
-    }
-    const t0 = xk[k++] ^ applySbox(sbox2, s0, s1, s2, s3);
-    const t1 = xk[k++] ^ applySbox(sbox2, s1, s2, s3, s0);
-    const t2 = xk[k++] ^ applySbox(sbox2, s2, s3, s0, s1);
-    const t3 = xk[k++] ^ applySbox(sbox2, s3, s0, s1, s2);
-    return { s0: t0, s1: t1, s2: t2, s3: t3 };
-  }
-  function decrypt(xk, s0, s1, s2, s3) {
-    const { sbox2, T01, T23 } = tableDecoding;
-    let k = 0;
-    s0 ^= xk[k++], s1 ^= xk[k++], s2 ^= xk[k++], s3 ^= xk[k++];
-    const rounds = xk.length / 4 - 2;
-    for (let i2 = 0; i2 < rounds; i2++) {
-      const t02 = xk[k++] ^ apply0123(T01, T23, s0, s3, s2, s1);
-      const t12 = xk[k++] ^ apply0123(T01, T23, s1, s0, s3, s2);
-      const t22 = xk[k++] ^ apply0123(T01, T23, s2, s1, s0, s3);
-      const t32 = xk[k++] ^ apply0123(T01, T23, s3, s2, s1, s0);
-      s0 = t02, s1 = t12, s2 = t22, s3 = t32;
-    }
-    const t0 = xk[k++] ^ applySbox(sbox2, s0, s3, s2, s1);
-    const t1 = xk[k++] ^ applySbox(sbox2, s1, s0, s3, s2);
-    const t2 = xk[k++] ^ applySbox(sbox2, s2, s1, s0, s3);
-    const t3 = xk[k++] ^ applySbox(sbox2, s3, s2, s1, s0);
-    return { s0: t0, s1: t1, s2: t2, s3: t3 };
-  }
-  function validateBlockDecrypt(data) {
-    abytes3(data);
-    if (data.length % BLOCK_SIZE !== 0) {
-      throw new Error("aes-(cbc/ecb).decrypt ciphertext should consist of blocks with size " + BLOCK_SIZE);
-    }
-  }
-  function validateBlockEncrypt(plaintext, pcks5, dst) {
-    abytes3(plaintext);
-    let outLen = plaintext.length;
-    const remaining = outLen % BLOCK_SIZE;
-    if (!pcks5 && remaining !== 0)
-      throw new Error("aec/(cbc-ecb): unpadded plaintext with disabled padding");
-    if (!isAligned32(plaintext))
-      plaintext = copyBytes2(plaintext);
-    const b = u32(plaintext);
-    if (pcks5) {
-      let left = BLOCK_SIZE - remaining;
-      if (!left)
-        left = BLOCK_SIZE;
-      outLen = outLen + left;
-    }
-    dst = getOutput(outLen, dst);
-    complexOverlapBytes(plaintext, dst);
-    const o = u32(dst);
-    return { b, o, out: dst };
-  }
-  function validatePCKS(data, pcks5) {
-    if (!pcks5)
-      return data;
-    const len = data.length;
-    if (!len)
-      throw new Error("aes/pcks5: empty ciphertext not allowed");
-    const lastByte = data[len - 1];
-    if (lastByte <= 0 || lastByte > 16)
-      throw new Error("aes/pcks5: wrong padding");
-    const out = data.subarray(0, -lastByte);
-    for (let i2 = 0; i2 < lastByte; i2++)
-      if (data[len - i2 - 1] !== lastByte)
-        throw new Error("aes/pcks5: wrong padding");
-    return out;
-  }
-  function padPCKS(left) {
-    const tmp = new Uint8Array(16);
-    const tmp32 = u32(tmp);
-    tmp.set(left);
-    const paddingByte = BLOCK_SIZE - left.length;
-    for (let i2 = BLOCK_SIZE - paddingByte; i2 < BLOCK_SIZE; i2++)
-      tmp[i2] = paddingByte;
-    return tmp32;
-  }
-  var cbc = /* @__PURE__ */ wrapCipher({ blockSize: 16, nonceLength: 16 }, function aescbc(key, iv, opts = {}) {
-    const pcks5 = !opts.disablePadding;
-    return {
-      encrypt(plaintext, dst) {
-        const xk = expandKeyLE(key);
-        const { b, o, out: _out } = validateBlockEncrypt(plaintext, pcks5, dst);
-        let _iv = iv;
-        const toClean = [xk];
-        if (!isAligned32(_iv))
-          toClean.push(_iv = copyBytes2(_iv));
-        const n32 = u32(_iv);
-        let s0 = n32[0], s1 = n32[1], s2 = n32[2], s3 = n32[3];
-        let i2 = 0;
-        for (; i2 + 4 <= b.length; ) {
-          s0 ^= b[i2 + 0], s1 ^= b[i2 + 1], s2 ^= b[i2 + 2], s3 ^= b[i2 + 3];
-          ({ s0, s1, s2, s3 } = encrypt(xk, s0, s1, s2, s3));
-          o[i2++] = s0, o[i2++] = s1, o[i2++] = s2, o[i2++] = s3;
-        }
-        if (pcks5) {
-          const tmp32 = padPCKS(plaintext.subarray(i2 * 4));
-          s0 ^= tmp32[0], s1 ^= tmp32[1], s2 ^= tmp32[2], s3 ^= tmp32[3];
-          ({ s0, s1, s2, s3 } = encrypt(xk, s0, s1, s2, s3));
-          o[i2++] = s0, o[i2++] = s1, o[i2++] = s2, o[i2++] = s3;
-        }
-        clean2(...toClean);
-        return _out;
-      },
-      decrypt(ciphertext, dst) {
-        validateBlockDecrypt(ciphertext);
-        const xk = expandKeyDecLE(key);
-        let _iv = iv;
-        const toClean = [xk];
-        if (!isAligned32(_iv))
-          toClean.push(_iv = copyBytes2(_iv));
-        const n32 = u32(_iv);
-        dst = getOutput(ciphertext.length, dst);
-        if (!isAligned32(ciphertext))
-          toClean.push(ciphertext = copyBytes2(ciphertext));
-        complexOverlapBytes(ciphertext, dst);
-        const b = u32(ciphertext);
-        const o = u32(dst);
-        let s0 = n32[0], s1 = n32[1], s2 = n32[2], s3 = n32[3];
-        for (let i2 = 0; i2 + 4 <= b.length; ) {
-          const ps0 = s0, ps1 = s1, ps2 = s2, ps3 = s3;
-          s0 = b[i2 + 0], s1 = b[i2 + 1], s2 = b[i2 + 2], s3 = b[i2 + 3];
-          const { s0: o0, s1: o1, s2: o2, s3: o3 } = decrypt(xk, s0, s1, s2, s3);
-          o[i2++] = o0 ^ ps0, o[i2++] = o1 ^ ps1, o[i2++] = o2 ^ ps2, o[i2++] = o3 ^ ps3;
-        }
-        clean2(...toClean);
-        return validatePCKS(dst, pcks5);
-      }
-    };
-  });
-  function isBytes32(a) {
-    return a instanceof Uint32Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint32Array";
-  }
-  function encryptBlock(xk, block) {
-    abytes3(block, 16, "block");
-    if (!isBytes32(xk))
-      throw new Error("_encryptBlock accepts result of expandKeyLE");
-    const b32 = u32(block);
-    let { s0, s1, s2, s3 } = encrypt(xk, b32[0], b32[1], b32[2], b32[3]);
-    b32[0] = s0, b32[1] = s1, b32[2] = s2, b32[3] = s3;
-    return block;
-  }
-  function dbl(block) {
-    let carry = 0;
-    for (let i2 = BLOCK_SIZE - 1; i2 >= 0; i2--) {
-      const newCarry = (block[i2] & 128) >>> 7;
-      block[i2] = block[i2] << 1 | carry;
-      carry = newCarry;
-    }
-    if (carry) {
-      block[BLOCK_SIZE - 1] ^= 135;
-    }
-    return block;
-  }
-  function xorBlock(a, b) {
-    if (a.length !== b.length)
-      throw new Error("xorBlock: blocks must have same length");
-    for (let i2 = 0; i2 < a.length; i2++) {
-      a[i2] = a[i2] ^ b[i2];
-    }
-    return a;
-  }
-  var _CMAC = class {
-    constructor(key) {
-      __publicField(this, "buffer");
-      __publicField(this, "destroyed");
-      __publicField(this, "k1");
-      __publicField(this, "k2");
-      __publicField(this, "xk");
-      abytes3(key);
-      validateKeyLength(key);
-      this.xk = expandKeyLE(key);
-      this.buffer = new Uint8Array(0);
-      this.destroyed = false;
-      const L = new Uint8Array(BLOCK_SIZE);
-      encryptBlock(this.xk, L);
-      this.k1 = dbl(L);
-      this.k2 = dbl(new Uint8Array(this.k1));
-    }
-    update(data) {
-      const { destroyed, buffer } = this;
-      if (destroyed)
-        throw new Error("CMAC instance was destroyed");
-      abytes3(data);
-      const newBuffer = new Uint8Array(buffer.length + data.length);
-      newBuffer.set(buffer);
-      newBuffer.set(data, buffer.length);
-      this.buffer = newBuffer;
-      return this;
-    }
-    // see https://www.rfc-editor.org/rfc/rfc4493.html#section-2.4
-    digest() {
-      if (this.destroyed)
-        throw new Error("CMAC instance was destroyed");
-      const { buffer } = this;
-      const msgLen = buffer.length;
-      let n = Math.ceil(msgLen / BLOCK_SIZE);
-      let flag;
-      if (n === 0) {
-        n = 1;
-        flag = false;
-      } else {
-        flag = msgLen % BLOCK_SIZE === 0;
-      }
-      const lastBlockStart = (n - 1) * BLOCK_SIZE;
-      const lastBlockData = buffer.subarray(lastBlockStart);
-      let m_last;
-      if (flag) {
-        m_last = xorBlock(new Uint8Array(lastBlockData), this.k1);
-      } else {
-        const padded = new Uint8Array(BLOCK_SIZE);
-        padded.set(lastBlockData);
-        padded[lastBlockData.length] = 128;
-        m_last = xorBlock(padded, this.k2);
-      }
-      let x = new Uint8Array(BLOCK_SIZE);
-      for (let i2 = 0; i2 < n - 1; i2++) {
-        const m_i = buffer.subarray(i2 * BLOCK_SIZE, (i2 + 1) * BLOCK_SIZE);
-        xorBlock(x, m_i);
-        encryptBlock(this.xk, x);
-      }
-      xorBlock(x, m_last);
-      encryptBlock(this.xk, x);
-      clean2(m_last);
-      return x;
-    }
-    destroy() {
-      const { buffer, destroyed, xk, k1, k2 } = this;
-      if (destroyed)
-        return;
-      this.destroyed = true;
-      clean2(buffer, xk, k1, k2);
-    }
-  };
-  var cmac = (key, message) => new _CMAC(key).update(message).digest();
-  cmac.create = (key) => new _CMAC(key);
 
   // node_modules/@noble/ciphers/_arx.js
   var encodeStr = (str) => Uint8Array.from(str.split(""), (c) => c.charCodeAt(0));
@@ -3140,19 +2728,19 @@ var CoralieCore = (() => {
     const { allowShortKeys, extendNonceFn, counterLength, counterRight, rounds } = checkOpts({ allowShortKeys: false, counterLength: 8, counterRight: false, rounds: 20 }, opts);
     if (typeof core !== "function")
       throw new Error("core must be a function");
-    anumber3(counterLength);
-    anumber3(rounds);
+    anumber2(counterLength);
+    anumber2(rounds);
     abool2(counterRight);
     abool2(allowShortKeys);
     return (key, nonce, data, output, counter = 0) => {
-      abytes3(key, void 0, "key");
-      abytes3(nonce, void 0, "nonce");
-      abytes3(data, void 0, "data");
+      abytes2(key, void 0, "key");
+      abytes2(nonce, void 0, "nonce");
+      abytes2(data, void 0, "data");
       const len = data.length;
       if (output === void 0)
         output = new Uint8Array(len);
-      abytes3(output, void 0, "output");
-      anumber3(counter);
+      abytes2(output, void 0, "output");
+      anumber2(counter);
       if (counter < 0 || counter >= MAX_COUNTER)
         throw new Error("arx: counter overflow");
       if (output.length < len)
@@ -3171,7 +2759,7 @@ var CoralieCore = (() => {
         sigma = sigma16_32;
         toClean.push(k);
       } else {
-        abytes3(key, 32, "arx key");
+        abytes2(key, 32, "arx key");
         throw new Error("invalid key size");
       }
       if (!isAligned322(nonce))
@@ -3215,7 +2803,7 @@ var CoralieCore = (() => {
       __publicField(this, "pad", new Uint16Array(8));
       __publicField(this, "pos", 0);
       __publicField(this, "finished", false);
-      key = copyBytes2(abytes3(key, 32, "key"));
+      key = copyBytes2(abytes2(key, 32, "key"));
       const t0 = u8to16(key, 0);
       const t1 = u8to16(key, 2);
       const t2 = u8to16(key, 4);
@@ -3395,7 +2983,7 @@ var CoralieCore = (() => {
     }
     update(data) {
       aexists2(this);
-      abytes3(data);
+      abytes2(data);
       data = copyBytes2(data);
       const { buffer, blockLen } = this;
       const len = data.length;
@@ -3644,7 +3232,7 @@ var CoralieCore = (() => {
   var ZEROS32 = /* @__PURE__ */ new Uint8Array(32);
   function computeTag(fn, key, nonce, ciphertext, AAD) {
     if (AAD !== void 0)
-      abytes3(AAD, void 0, "AAD");
+      abytes2(AAD, void 0, "AAD");
     const authKey = fn(key, nonce, ZEROS32);
     const lengths = u64Lengths(ciphertext.length, AAD ? AAD.length : 0, true);
     const h = poly1305.create(authKey);
@@ -3723,1178 +3311,214 @@ var CoralieCore = (() => {
     return okm.slice(0, length);
   }
 
-  // node_modules/nostr-tools/lib/esm/index.js
-  var __defProp2 = Object.defineProperty;
-  var __export2 = (target, all) => {
-    for (var name in all)
-      __defProp2(target, name, { get: all[name], enumerable: true });
-  };
-  var verifiedSymbol = /* @__PURE__ */ Symbol("verified");
-  var isRecord = (obj) => obj instanceof Object;
-  function validateEvent(event) {
-    if (!isRecord(event))
+  // node_modules/@scure/base/index.js
+  function isBytes3(a) {
+    return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
+  }
+  function abytes3(b) {
+    if (!isBytes3(b))
+      throw new Error("Uint8Array expected");
+  }
+  function isArrayOf(isString, arr) {
+    if (!Array.isArray(arr))
       return false;
-    if (typeof event.kind !== "number")
-      return false;
-    if (typeof event.content !== "string")
-      return false;
-    if (typeof event.created_at !== "number")
-      return false;
-    if (typeof event.pubkey !== "string")
-      return false;
-    if (!event.pubkey.match(/^[a-f0-9]{64}$/))
-      return false;
-    if (!Array.isArray(event.tags))
-      return false;
-    for (let i2 = 0; i2 < event.tags.length; i2++) {
-      let tag = event.tags[i2];
-      if (!Array.isArray(tag))
-        return false;
-      for (let j = 0; j < tag.length; j++) {
-        if (typeof tag[j] !== "string")
-          return false;
-      }
+    if (arr.length === 0)
+      return true;
+    if (isString) {
+      return arr.every((item) => typeof item === "string");
+    } else {
+      return arr.every((item) => Number.isSafeInteger(item));
     }
+  }
+  function astr(label, input) {
+    if (typeof input !== "string")
+      throw new Error(`${label}: string expected`);
     return true;
   }
-  var utils_exports = {};
-  __export2(utils_exports, {
-    binarySearch: () => binarySearch,
-    bytesToHex: () => bytesToHex,
-    hexToBytes: () => hexToBytes,
-    insertEventIntoAscendingList: () => insertEventIntoAscendingList,
-    insertEventIntoDescendingList: () => insertEventIntoDescendingList,
-    mergeReverseSortedLists: () => mergeReverseSortedLists,
-    normalizeURL: () => normalizeURL,
-    utf8Decoder: () => utf8Decoder,
-    utf8Encoder: () => utf8Encoder
-  });
-  var utf8Decoder = new TextDecoder("utf-8");
-  var utf8Encoder = new TextEncoder();
-  function normalizeURL(url) {
-    try {
-      if (url.indexOf("://") === -1)
-        url = "wss://" + url;
-      let p = new URL(url);
-      if (p.protocol === "http:")
-        p.protocol = "ws:";
-      else if (p.protocol === "https:")
-        p.protocol = "wss:";
-      p.pathname = p.pathname.replace(/\/+/g, "/");
-      if (p.pathname.endsWith("/"))
-        p.pathname = p.pathname.slice(0, -1);
-      if (p.port === "80" && p.protocol === "ws:" || p.port === "443" && p.protocol === "wss:")
-        p.port = "";
-      p.searchParams.sort();
-      p.hash = "";
-      return p.toString();
-    } catch (e) {
-      throw new Error(`Invalid URL: ${url}`);
-    }
+  function anumber3(n) {
+    if (!Number.isSafeInteger(n))
+      throw new Error(`invalid integer: ${n}`);
   }
-  function insertEventIntoDescendingList(sortedArray, event) {
-    const [idx, found] = binarySearch(sortedArray, (b) => {
-      if (event.id === b.id)
-        return 0;
-      if (event.created_at === b.created_at)
-        return -1;
-      return b.created_at - event.created_at;
-    });
-    if (!found) {
-      sortedArray.splice(idx, 0, event);
-    }
-    return sortedArray;
+  function aArr(input) {
+    if (!Array.isArray(input))
+      throw new Error("array expected");
   }
-  function insertEventIntoAscendingList(sortedArray, event) {
-    const [idx, found] = binarySearch(sortedArray, (b) => {
-      if (event.id === b.id)
-        return 0;
-      if (event.created_at === b.created_at)
-        return -1;
-      return event.created_at - b.created_at;
-    });
-    if (!found) {
-      sortedArray.splice(idx, 0, event);
-    }
-    return sortedArray;
+  function astrArr(label, input) {
+    if (!isArrayOf(true, input))
+      throw new Error(`${label}: array of strings expected`);
   }
-  function binarySearch(arr, compare) {
-    let start = 0;
-    let end = arr.length - 1;
-    while (start <= end) {
-      const mid = Math.floor((start + end) / 2);
-      const cmp = compare(arr[mid]);
-      if (cmp === 0) {
-        return [mid, true];
-      }
-      if (cmp < 0) {
-        end = mid - 1;
-      } else {
-        start = mid + 1;
-      }
-    }
-    return [start, false];
+  function anumArr(label, input) {
+    if (!isArrayOf(false, input))
+      throw new Error(`${label}: array of numbers expected`);
   }
-  function mergeReverseSortedLists(list1, list2) {
-    const result = new Array(list1.length + list2.length);
-    result.length = 0;
-    let i1 = 0;
-    let i2 = 0;
-    let sameTimestampIds = [];
-    while (i1 < list1.length && i2 < list2.length) {
-      let next;
-      if (list1[i1]?.created_at > list2[i2]?.created_at) {
-        next = list1[i1];
-        i1++;
-      } else {
-        next = list2[i2];
-        i2++;
-      }
-      if (result.length > 0 && result[result.length - 1].created_at === next.created_at) {
-        if (sameTimestampIds.includes(next.id))
-          continue;
-      } else {
-        sameTimestampIds.length = 0;
-      }
-      result.push(next);
-      sameTimestampIds.push(next.id);
-    }
-    while (i1 < list1.length) {
-      const next = list1[i1];
-      i1++;
-      if (result.length > 0 && result[result.length - 1].created_at === next.created_at) {
-        if (sameTimestampIds.includes(next.id))
-          continue;
-      } else {
-        sameTimestampIds.length = 0;
-      }
-      result.push(next);
-      sameTimestampIds.push(next.id);
-    }
-    while (i2 < list2.length) {
-      const next = list2[i2];
-      i2++;
-      if (result.length > 0 && result[result.length - 1].created_at === next.created_at) {
-        if (sameTimestampIds.includes(next.id))
-          continue;
-      } else {
-        sameTimestampIds.length = 0;
-      }
-      result.push(next);
-      sameTimestampIds.push(next.id);
-    }
-    return result;
+  // @__NO_SIDE_EFFECTS__
+  function chain(...args) {
+    const id = (a) => a;
+    const wrap = (a, b) => (c) => a(b(c));
+    const encode = args.map((x) => x.encode).reduceRight(wrap, id);
+    const decode = args.map((x) => x.decode).reduce(wrap, id);
+    return { encode, decode };
   }
-  var JS = class {
-    generateSecretKey() {
-      return schnorr.utils.randomSecretKey();
-    }
-    getPublicKey(secretKey) {
-      return bytesToHex(schnorr.getPublicKey(secretKey));
-    }
-    finalizeEvent(t, secretKey) {
-      const event = t;
-      event.pubkey = bytesToHex(schnorr.getPublicKey(secretKey));
-      event.id = getEventHash(event);
-      event.sig = bytesToHex(schnorr.sign(hexToBytes(getEventHash(event)), secretKey));
-      event[verifiedSymbol] = true;
-      return event;
-    }
-    verifyEvent(event) {
-      if (typeof event[verifiedSymbol] === "boolean")
-        return event[verifiedSymbol];
-      try {
-        const hash = getEventHash(event);
-        if (hash !== event.id) {
-          event[verifiedSymbol] = false;
-          return false;
-        }
-        const valid = schnorr.verify(hexToBytes(event.sig), hexToBytes(hash), hexToBytes(event.pubkey));
-        event[verifiedSymbol] = valid;
-        return valid;
-      } catch (err) {
-        event[verifiedSymbol] = false;
-        return false;
-      }
-    }
-  };
-  function serializeEvent(evt) {
-    if (!validateEvent(evt))
-      throw new Error("can't serialize event with wrong or missing properties");
-    return JSON.stringify([0, evt.pubkey, evt.created_at, evt.kind, evt.tags, evt.content]);
-  }
-  function getEventHash(event) {
-    let eventHash = sha256(utf8Encoder.encode(serializeEvent(event)));
-    return bytesToHex(eventHash);
-  }
-  var i = new JS();
-  var generateSecretKey = i.generateSecretKey;
-  var getPublicKey = i.getPublicKey;
-  var finalizeEvent = i.finalizeEvent;
-  var verifyEvent = i.verifyEvent;
-  var kinds_exports = {};
-  __export2(kinds_exports, {
-    AIEmbeddings: () => AIEmbeddings,
-    AppCurationSet: () => AppCurationSet,
-    Application: () => Application,
-    AuthoredPodcasts: () => AuthoredPodcasts,
-    BadgeAward: () => BadgeAward,
-    BadgeDefinition: () => BadgeDefinition,
-    Bid: () => Bid,
-    BidConfirmation: () => BidConfirmation,
-    BlobsAuth: () => BlobsAuth,
-    BlockedRelaysList: () => BlockedRelaysList,
-    BlossomServerList: () => BlossomServerList,
-    BookmarkList: () => BookmarkList,
-    Bookmarksets: () => Bookmarksets,
-    Calendar: () => Calendar,
-    CalendarEventRSVP: () => CalendarEventRSVP,
-    CashuMintAnnouncement: () => CashuMintAnnouncement,
-    CashuWalletEvent: () => CashuWalletEvent,
-    CashuWalletHistory: () => CashuWalletHistory,
-    CashuWalletTokens: () => CashuWalletTokens,
-    ChannelCreation: () => ChannelCreation,
-    ChannelHideMessage: () => ChannelHideMessage,
-    ChannelMessage: () => ChannelMessage,
-    ChannelMetadata: () => ChannelMetadata,
-    ChannelMuteUser: () => ChannelMuteUser,
-    ChatMessage: () => ChatMessage,
-    Chess: () => Chess,
-    ClassifiedListing: () => ClassifiedListing,
-    ClientAuth: () => ClientAuth,
-    CodeSnippet: () => CodeSnippet,
-    CoinjoinPool: () => CoinjoinPool,
-    Comment: () => Comment,
-    CommunitiesList: () => CommunitiesList,
-    CommunityDefinition: () => CommunityDefinition,
-    CommunityPostApproval: () => CommunityPostApproval,
-    ConferenceEvent: () => ConferenceEvent,
-    Contacts: () => Contacts,
-    CreateOrUpdateProduct: () => CreateOrUpdateProduct,
-    CreateOrUpdateStall: () => CreateOrUpdateStall,
-    CuratedVideoSets: () => CuratedVideoSets,
-    Curationsets: () => Curationsets,
-    Date: () => Date2,
-    DecoupledEncryptionKeyDistribution: () => DecoupledEncryptionKeyDistribution,
-    DecoupledKeyAnnouncement: () => DecoupledKeyAnnouncement,
-    DecoupledKeyClientAnnouncement: () => DecoupledKeyClientAnnouncement,
-    DirectMessageRelaysList: () => DirectMessageRelaysList,
-    DraftClassifiedListing: () => DraftClassifiedListing,
-    DraftEvent: () => DraftEvent,
-    DraftLong: () => DraftLong,
-    Emojisets: () => Emojisets,
-    EncryptedDirectMessage: () => EncryptedDirectMessage,
-    EventDeletion: () => EventDeletion,
-    FavoritePodcasts: () => FavoritePodcasts,
-    FavoriteRelays: () => FavoriteRelays,
-    FedimintAnnouncement: () => FedimintAnnouncement,
-    Feed: () => Feed,
-    FileMessage: () => FileMessage,
-    FileMetadata: () => FileMetadata,
-    FileServerPreference: () => FileServerPreference,
-    Followsets: () => Followsets,
-    ForumThread: () => ForumThread,
-    GenericRepost: () => GenericRepost,
-    Genericlists: () => Genericlists,
-    GeocacheListing: () => GeocacheListing,
-    GeocacheLog: () => GeocacheLog,
-    GeocacheLogEntry: () => GeocacheLogEntry,
-    GeocacheProofOfFind: () => GeocacheProofOfFind,
-    GiftWrap: () => GiftWrap,
-    GitPullRequest: () => GitPullRequest,
-    GitPullRequestUpdate: () => GitPullRequestUpdate,
-    GoodWikiAuthorList: () => GoodWikiAuthorList,
-    GoodWikiRelayList: () => GoodWikiRelayList,
-    GroupMetadata: () => GroupMetadata,
-    HTTPAuth: () => HTTPAuth,
-    Handlerinformation: () => Handlerinformation,
-    Handlerrecommendation: () => Handlerrecommendation,
-    Highlights: () => Highlights,
-    InteractiveRoom: () => InteractiveRoom,
-    InterestsList: () => InterestsList,
-    Interestsets: () => Interestsets,
-    Issue: () => Issue,
-    JobFeedback: () => JobFeedback,
-    JobRequest: () => JobRequest,
-    JobResult: () => JobResult,
-    Label: () => Label,
-    LegacyNsiteFile: () => LegacyNsiteFile,
-    LightningPubRPC: () => LightningPubRPC,
-    LinkSet: () => LinkSet,
-    LiveChatMessage: () => LiveChatMessage,
-    LiveEvent: () => LiveEvent,
-    LongFormArticle: () => LongFormArticle,
-    MarketplaceUI: () => MarketplaceUI,
-    MediaFollows: () => MediaFollows,
-    MediaStarterPacks: () => MediaStarterPacks,
-    MergeRequests: () => MergeRequests,
-    Metadata: () => Metadata,
-    ModularArticleContent: () => ModularArticleContent,
-    ModularArticleHeader: () => ModularArticleHeader,
-    MuteSets: () => MuteSets,
-    Mutelist: () => Mutelist,
-    NWCWalletInfo: () => NWCWalletInfo,
-    NWCWalletRequest: () => NWCWalletRequest,
-    NWCWalletResponse: () => NWCWalletResponse,
-    NormalVideo: () => NormalVideo,
-    NostrConnect: () => NostrConnect,
-    NsiteNamed: () => NsiteNamed,
-    NsiteRoot: () => NsiteRoot,
-    NutZap: () => NutZap,
-    NutZapInfo: () => NutZapInfo,
-    OpenTimestamps: () => OpenTimestamps,
-    Patch: () => Patch,
-    PeerToPeerOrderEvents: () => PeerToPeerOrderEvents,
-    Photo: () => Photo,
-    Pinlist: () => Pinlist,
-    PodcastEpisode: () => PodcastEpisode,
-    PodcastMetadata: () => PodcastMetadata,
-    Poll: () => Poll,
-    PollResponse: () => PollResponse,
-    PrivateDirectMessage: () => PrivateDirectMessage,
-    PrivateEventRelayList: () => PrivateEventRelayList,
-    ProblemTracker: () => ProblemTracker,
-    ProductSoldAsAuction: () => ProductSoldAsAuction,
-    ProfileBadges: () => ProfileBadges,
-    ProxyAnnouncement: () => ProxyAnnouncement,
-    PublicChatsList: () => PublicChatsList,
-    PublicMessage: () => PublicMessage,
-    Reaction: () => Reaction,
-    ReactionToWebsite: () => ReactionToWebsite,
-    RecommendRelay: () => RecommendRelay,
-    Redirects: () => Redirects,
-    RelayDiscovery: () => RelayDiscovery,
-    RelayList: () => RelayList,
-    RelayMonitorAnnouncement: () => RelayMonitorAnnouncement,
-    RelayReview: () => RelayReview,
-    RelayReviews: () => RelayReviews,
-    Relaysets: () => Relaysets,
-    ReleaseArtifactSets: () => ReleaseArtifactSets,
-    Reply: () => Reply,
-    Report: () => Report,
-    Reporting: () => Reporting,
-    RepositoryAnnouncement: () => RepositoryAnnouncement,
-    RepositoryState: () => RepositoryState,
-    Repost: () => Repost,
-    ReservedCashuWalletTokens: () => ReservedCashuWalletTokens,
-    RoomPresence: () => RoomPresence,
-    Scroll: () => Scroll,
-    Seal: () => Seal,
-    SearchRelaysList: () => SearchRelaysList,
-    ShortTextNote: () => ShortTextNote,
-    ShortVideo: () => ShortVideo,
-    SimpleGroupAdmins: () => SimpleGroupAdmins,
-    SimpleGroupCreateGroup: () => SimpleGroupCreateGroup,
-    SimpleGroupCreateInvite: () => SimpleGroupCreateInvite,
-    SimpleGroupDeleteEvent: () => SimpleGroupDeleteEvent,
-    SimpleGroupDeleteGroup: () => SimpleGroupDeleteGroup,
-    SimpleGroupEditMetadata: () => SimpleGroupEditMetadata,
-    SimpleGroupJoinRequest: () => SimpleGroupJoinRequest,
-    SimpleGroupLeaveRequest: () => SimpleGroupLeaveRequest,
-    SimpleGroupList: () => SimpleGroupList,
-    SimpleGroupLiveKitParticipants: () => SimpleGroupLiveKitParticipants,
-    SimpleGroupMembers: () => SimpleGroupMembers,
-    SimpleGroupPutUser: () => SimpleGroupPutUser,
-    SimpleGroupRemoveUser: () => SimpleGroupRemoveUser,
-    SimpleGroupReply: () => SimpleGroupReply,
-    SimpleGroupRoles: () => SimpleGroupRoles,
-    SimpleGroupThreadedReply: () => SimpleGroupThreadedReply,
-    SlideSet: () => SlideSet,
-    SoftwareApplication: () => SoftwareApplication,
-    StarterPacks: () => StarterPacks,
-    StatusApplied: () => StatusApplied,
-    StatusClosed: () => StatusClosed,
-    StatusDraft: () => StatusDraft,
-    StatusOpen: () => StatusOpen,
-    TidalLogin: () => TidalLogin,
-    Time: () => Time,
-    Torrent: () => Torrent,
-    TorrentComment: () => TorrentComment,
-    TransportMethodAnnouncement: () => TransportMethodAnnouncement,
-    UserEmojiList: () => UserEmojiList,
-    UserGraspList: () => UserGraspList,
-    UserStatuses: () => UserStatuses,
-    VideoViewEvent: () => VideoViewEvent,
-    Voice: () => Voice,
-    VoiceComment: () => VoiceComment,
-    WebBookmarks: () => WebBookmarks,
-    WikiArticle: () => WikiArticle,
-    Zap: () => Zap,
-    ZapGoal: () => ZapGoal,
-    ZapRequest: () => ZapRequest,
-    classifyKind: () => classifyKind,
-    isAddressableKind: () => isAddressableKind,
-    isEphemeralKind: () => isEphemeralKind,
-    isKind: () => isKind,
-    isRegularKind: () => isRegularKind,
-    isReplaceableKind: () => isReplaceableKind
-  });
-  function isRegularKind(kind) {
-    return kind < 1e4 && kind !== 0 && kind !== 3;
-  }
-  function isReplaceableKind(kind) {
-    return kind === 0 || kind === 3 || 1e4 <= kind && kind < 2e4;
-  }
-  function isEphemeralKind(kind) {
-    return 2e4 <= kind && kind < 3e4;
-  }
-  function isAddressableKind(kind) {
-    return 3e4 <= kind && kind < 4e4;
-  }
-  function classifyKind(kind) {
-    if (isRegularKind(kind))
-      return "regular";
-    if (isReplaceableKind(kind))
-      return "replaceable";
-    if (isEphemeralKind(kind))
-      return "ephemeral";
-    if (isAddressableKind(kind))
-      return "parameterized";
-    return "unknown";
-  }
-  function isKind(event, kind) {
-    const kindAsArray = kind instanceof Array ? kind : [kind];
-    return validateEvent(event) && kindAsArray.includes(event.kind) || false;
-  }
-  var Metadata = 0;
-  var ShortTextNote = 1;
-  var RecommendRelay = 2;
-  var Contacts = 3;
-  var EncryptedDirectMessage = 4;
-  var EventDeletion = 5;
-  var Repost = 6;
-  var Reaction = 7;
-  var BadgeAward = 8;
-  var ChatMessage = 9;
-  var SimpleGroupThreadedReply = 10;
-  var ForumThread = 11;
-  var SimpleGroupReply = 12;
-  var Seal = 13;
-  var PrivateDirectMessage = 14;
-  var FileMessage = 15;
-  var GenericRepost = 16;
-  var ReactionToWebsite = 17;
-  var Photo = 20;
-  var NormalVideo = 21;
-  var ShortVideo = 22;
-  var PublicMessage = 24;
-  var ChannelCreation = 40;
-  var ChannelMetadata = 41;
-  var ChannelMessage = 42;
-  var ChannelHideMessage = 43;
-  var ChannelMuteUser = 44;
-  var PodcastEpisode = 54;
-  var Chess = 64;
-  var MergeRequests = 818;
-  var PollResponse = 1018;
-  var Bid = 1021;
-  var BidConfirmation = 1022;
-  var OpenTimestamps = 1040;
-  var GiftWrap = 1059;
-  var FileMetadata = 1063;
-  var Poll = 1068;
-  var Comment = 1111;
-  var Voice = 1222;
-  var Scroll = 1227;
-  var VoiceComment = 1244;
-  var LiveChatMessage = 1311;
-  var CodeSnippet = 1337;
-  var Patch = 1617;
-  var GitPullRequest = 1618;
-  var GitPullRequestUpdate = 1619;
-  var Issue = 1621;
-  var Reply = 1622;
-  var StatusOpen = 1630;
-  var StatusApplied = 1631;
-  var StatusClosed = 1632;
-  var StatusDraft = 1633;
-  var ProblemTracker = 1971;
-  var Report = 1984;
-  var Reporting = 1984;
-  var Label = 1985;
-  var RelayReviews = 1986;
-  var AIEmbeddings = 1987;
-  var Torrent = 2003;
-  var TorrentComment = 2004;
-  var CoinjoinPool = 2022;
-  var DecoupledKeyClientAnnouncement = 4454;
-  var DecoupledEncryptionKeyDistribution = 4455;
-  var CommunityPostApproval = 4550;
-  var JobRequest = 5999;
-  var JobResult = 6999;
-  var JobFeedback = 7e3;
-  var ReservedCashuWalletTokens = 7374;
-  var CashuWalletTokens = 7375;
-  var CashuWalletHistory = 7376;
-  var GeocacheLog = 7516;
-  var GeocacheProofOfFind = 7517;
-  var SimpleGroupPutUser = 9e3;
-  var SimpleGroupRemoveUser = 9001;
-  var SimpleGroupEditMetadata = 9002;
-  var SimpleGroupDeleteEvent = 9005;
-  var SimpleGroupCreateGroup = 9007;
-  var SimpleGroupDeleteGroup = 9008;
-  var SimpleGroupCreateInvite = 9009;
-  var SimpleGroupJoinRequest = 9021;
-  var SimpleGroupLeaveRequest = 9022;
-  var ZapGoal = 9041;
-  var NutZap = 9321;
-  var TidalLogin = 9467;
-  var ZapRequest = 9734;
-  var Zap = 9735;
-  var Highlights = 9802;
-  var Mutelist = 1e4;
-  var Pinlist = 10001;
-  var RelayList = 10002;
-  var BookmarkList = 10003;
-  var CommunitiesList = 10004;
-  var PublicChatsList = 10005;
-  var BlockedRelaysList = 10006;
-  var SearchRelaysList = 10007;
-  var SimpleGroupList = 10009;
-  var FavoriteRelays = 10012;
-  var PrivateEventRelayList = 10013;
-  var InterestsList = 10015;
-  var NutZapInfo = 10019;
-  var MediaFollows = 10020;
-  var UserEmojiList = 10030;
-  var DecoupledKeyAnnouncement = 10044;
-  var DirectMessageRelaysList = 10050;
-  var FavoritePodcasts = 10054;
-  var BlossomServerList = 10063;
-  var FileServerPreference = 10096;
-  var GoodWikiAuthorList = 10101;
-  var GoodWikiRelayList = 10102;
-  var PodcastMetadata = 10154;
-  var AuthoredPodcasts = 10164;
-  var RelayMonitorAnnouncement = 10166;
-  var RoomPresence = 10312;
-  var UserGraspList = 10317;
-  var ProxyAnnouncement = 10377;
-  var TransportMethodAnnouncement = 11111;
-  var NWCWalletInfo = 13194;
-  var NsiteRoot = 15128;
-  var CashuWalletEvent = 17375;
-  var LightningPubRPC = 21e3;
-  var ClientAuth = 22242;
-  var NWCWalletRequest = 23194;
-  var NWCWalletResponse = 23195;
-  var NostrConnect = 24133;
-  var BlobsAuth = 24242;
-  var HTTPAuth = 27235;
-  var Followsets = 3e4;
-  var Genericlists = 30001;
-  var Relaysets = 30002;
-  var Bookmarksets = 30003;
-  var Curationsets = 30004;
-  var CuratedVideoSets = 30005;
-  var MuteSets = 30007;
-  var ProfileBadges = 30008;
-  var BadgeDefinition = 30009;
-  var Interestsets = 30015;
-  var CreateOrUpdateStall = 30017;
-  var CreateOrUpdateProduct = 30018;
-  var MarketplaceUI = 30019;
-  var ProductSoldAsAuction = 30020;
-  var LongFormArticle = 30023;
-  var DraftLong = 30024;
-  var Emojisets = 30030;
-  var ModularArticleHeader = 30040;
-  var ModularArticleContent = 30041;
-  var ReleaseArtifactSets = 30063;
-  var Application = 30078;
-  var RelayDiscovery = 30166;
-  var AppCurationSet = 30267;
-  var LiveEvent = 30311;
-  var InteractiveRoom = 30312;
-  var ConferenceEvent = 30313;
-  var UserStatuses = 30315;
-  var SlideSet = 30388;
-  var ClassifiedListing = 30402;
-  var DraftClassifiedListing = 30403;
-  var RepositoryAnnouncement = 30617;
-  var RepositoryState = 30618;
-  var WikiArticle = 30818;
-  var Redirects = 30819;
-  var DraftEvent = 31234;
-  var LinkSet = 31388;
-  var Feed = 31890;
-  var Date2 = 31922;
-  var Time = 31923;
-  var Calendar = 31924;
-  var CalendarEventRSVP = 31925;
-  var RelayReview = 31987;
-  var Handlerrecommendation = 31989;
-  var Handlerinformation = 31990;
-  var SoftwareApplication = 32267;
-  var LegacyNsiteFile = 34128;
-  var VideoViewEvent = 34237;
-  var CommunityDefinition = 34550;
-  var NsiteNamed = 35128;
-  var GeocacheListing = 37515;
-  var GeocacheLogEntry = 37516;
-  var CashuMintAnnouncement = 38172;
-  var FedimintAnnouncement = 38173;
-  var PeerToPeerOrderEvents = 38383;
-  var GroupMetadata = 39e3;
-  var SimpleGroupAdmins = 39001;
-  var SimpleGroupMembers = 39002;
-  var SimpleGroupRoles = 39003;
-  var SimpleGroupLiveKitParticipants = 39004;
-  var StarterPacks = 39089;
-  var MediaStarterPacks = 39092;
-  var WebBookmarks = 39701;
-  var fakejson_exports = {};
-  __export2(fakejson_exports, {
-    getHex64: () => getHex64,
-    getInt: () => getInt,
-    getSubscriptionId: () => getSubscriptionId,
-    matchEventId: () => matchEventId,
-    matchEventKind: () => matchEventKind,
-    matchEventPubkey: () => matchEventPubkey
-  });
-  function getHex64(json, field) {
-    let len = field.length + 3;
-    let idx = json.indexOf(`"${field}":`) + len;
-    let s = json.slice(idx).indexOf(`"`) + idx + 1;
-    return json.slice(s, s + 64);
-  }
-  function getInt(json, field) {
-    let len = field.length;
-    let idx = json.indexOf(`"${field}":`) + len + 3;
-    let sliced = json.slice(idx);
-    let end = Math.min(sliced.indexOf(","), sliced.indexOf("}"));
-    return parseInt(sliced.slice(0, end), 10);
-  }
-  function getSubscriptionId(json) {
-    let idx = json.slice(0, 22).indexOf(`"EVENT"`);
-    if (idx === -1)
-      return null;
-    let pstart = json.slice(idx + 7 + 1).indexOf(`"`);
-    if (pstart === -1)
-      return null;
-    let start = idx + 7 + 1 + pstart;
-    let pend = json.slice(start + 1, 80).indexOf(`"`);
-    if (pend === -1)
-      return null;
-    let end = start + 1 + pend;
-    return json.slice(start + 1, end);
-  }
-  function matchEventId(json, id) {
-    return id === getHex64(json, "id");
-  }
-  function matchEventPubkey(json, pubkey) {
-    return pubkey === getHex64(json, "pubkey");
-  }
-  function matchEventKind(json, kind) {
-    return kind === getInt(json, "kind");
-  }
-  var nip42_exports = {};
-  __export2(nip42_exports, {
-    makeAuthEvent: () => makeAuthEvent
-  });
-  function makeAuthEvent(relayURL, challenge2) {
+  // @__NO_SIDE_EFFECTS__
+  function alphabet(letters) {
+    const lettersA = typeof letters === "string" ? letters.split("") : letters;
+    const len = lettersA.length;
+    astrArr("alphabet", lettersA);
+    const indexes = new Map(lettersA.map((l, i2) => [l, i2]));
     return {
-      kind: ClientAuth,
-      created_at: Math.floor(Date.now() / 1e3),
-      tags: [
-        ["relay", relayURL],
-        ["challenge", challenge2]
-      ],
-      content: ""
+      encode: (digits) => {
+        aArr(digits);
+        return digits.map((i2) => {
+          if (!Number.isSafeInteger(i2) || i2 < 0 || i2 >= len)
+            throw new Error(`alphabet.encode: digit index outside alphabet "${i2}". Allowed: ${letters}`);
+          return lettersA[i2];
+        });
+      },
+      decode: (input) => {
+        aArr(input);
+        return input.map((letter) => {
+          astr("alphabet.decode", letter);
+          const i2 = indexes.get(letter);
+          if (i2 === void 0)
+            throw new Error(`Unknown letter: "${letter}". Allowed: ${letters}`);
+          return i2;
+        });
+      }
     };
   }
-  var _WebSocket;
-  try {
-    _WebSocket = WebSocket;
-  } catch {
+  // @__NO_SIDE_EFFECTS__
+  function join(separator = "") {
+    astr("join", separator);
+    return {
+      encode: (from) => {
+        astrArr("join.decode", from);
+        return from.join(separator);
+      },
+      decode: (to) => {
+        astr("join.decode", to);
+        return to.split(separator);
+      }
+    };
   }
-  var M = 256;
-  var HLL_HEX_LENGTH = M * 2;
-  var utf8Encoder2 = new TextEncoder();
-  var _WebSocket2;
-  try {
-    _WebSocket2 = WebSocket;
-  } catch {
+  // @__NO_SIDE_EFFECTS__
+  function padding(bits, chr = "=") {
+    anumber3(bits);
+    astr("padding", chr);
+    return {
+      encode(data) {
+        astrArr("padding.encode", data);
+        while (data.length * bits % 8)
+          data.push(chr);
+        return data;
+      },
+      decode(input) {
+        astrArr("padding.decode", input);
+        let end = input.length;
+        if (end * bits % 8)
+          throw new Error("padding: invalid, string should have whole number of bytes");
+        for (; end > 0 && input[end - 1] === chr; end--) {
+          const last = end - 1;
+          const byte = last * bits;
+          if (byte % 8 === 0)
+            throw new Error("padding: invalid, string has too much padding");
+        }
+        return input.slice(0, end);
+      }
+    };
   }
-  var nip19_exports = {};
-  __export2(nip19_exports, {
-    BECH32_REGEX: () => BECH32_REGEX,
-    Bech32MaxSize: () => Bech32MaxSize,
-    NostrTypeGuard: () => NostrTypeGuard,
-    decode: () => decode,
-    decodeNostrURI: () => decodeNostrURI,
-    encodeBytes: () => encodeBytes,
-    naddrEncode: () => naddrEncode,
-    neventEncode: () => neventEncode,
-    noteEncode: () => noteEncode,
-    nprofileEncode: () => nprofileEncode,
-    npubEncode: () => npubEncode,
-    nsecEncode: () => nsecEncode
-  });
-  var NostrTypeGuard = {
-    isNProfile: (value) => /^nprofile1[a-z\d]+$/.test(value || ""),
-    isNEvent: (value) => /^nevent1[a-z\d]+$/.test(value || ""),
-    isNAddr: (value) => /^naddr1[a-z\d]+$/.test(value || ""),
-    isNSec: (value) => /^nsec1[a-z\d]{58}$/.test(value || ""),
-    isNPub: (value) => /^npub1[a-z\d]{58}$/.test(value || ""),
-    isNote: (value) => /^note1[a-z\d]+$/.test(value || ""),
-    isNcryptsec: (value) => /^ncryptsec1[a-z\d]+$/.test(value || "")
+  var gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+  var radix2carry = /* @__NO_SIDE_EFFECTS__ */ (from, to) => from + (to - gcd(from, to));
+  var powers = /* @__PURE__ */ (() => {
+    let res = [];
+    for (let i2 = 0; i2 < 40; i2++)
+      res.push(2 ** i2);
+    return res;
+  })();
+  function convertRadix2(data, from, to, padding2) {
+    aArr(data);
+    if (from <= 0 || from > 32)
+      throw new Error(`convertRadix2: wrong from=${from}`);
+    if (to <= 0 || to > 32)
+      throw new Error(`convertRadix2: wrong to=${to}`);
+    if (/* @__PURE__ */ radix2carry(from, to) > 32) {
+      throw new Error(`convertRadix2: carry overflow from=${from} to=${to} carryBits=${/* @__PURE__ */ radix2carry(from, to)}`);
+    }
+    let carry = 0;
+    let pos = 0;
+    const max = powers[from];
+    const mask = powers[to] - 1;
+    const res = [];
+    for (const n of data) {
+      anumber3(n);
+      if (n >= max)
+        throw new Error(`convertRadix2: invalid data word=${n} from=${from}`);
+      carry = carry << from | n;
+      if (pos + from > 32)
+        throw new Error(`convertRadix2: carry overflow pos=${pos} from=${from}`);
+      pos += from;
+      for (; pos >= to; pos -= to)
+        res.push((carry >> pos - to & mask) >>> 0);
+      const pow = powers[pos];
+      if (pow === void 0)
+        throw new Error("invalid carry");
+      carry &= pow - 1;
+    }
+    carry = carry << to - pos & mask;
+    if (!padding2 && pos >= from)
+      throw new Error("Excess padding");
+    if (!padding2 && carry > 0)
+      throw new Error(`Non-zero padding: ${carry}`);
+    if (padding2 && pos > 0)
+      res.push(carry >>> 0);
+    return res;
+  }
+  // @__NO_SIDE_EFFECTS__
+  function radix2(bits, revPadding = false) {
+    anumber3(bits);
+    if (bits <= 0 || bits > 32)
+      throw new Error("radix2: bits should be in (0..32]");
+    if (/* @__PURE__ */ radix2carry(8, bits) > 32 || /* @__PURE__ */ radix2carry(bits, 8) > 32)
+      throw new Error("radix2: carry overflow");
+    return {
+      encode: (bytes) => {
+        if (!isBytes3(bytes))
+          throw new Error("radix2.encode input should be Uint8Array");
+        return convertRadix2(Array.from(bytes), 8, bits, !revPadding);
+      },
+      decode: (digits) => {
+        anumArr("radix2.decode", digits);
+        return Uint8Array.from(convertRadix2(digits, bits, 8, revPadding));
+      }
+    };
+  }
+  var hasBase64Builtin = /* @__PURE__ */ (() => typeof Uint8Array.from([]).toBase64 === "function" && typeof Uint8Array.fromBase64 === "function")();
+  var decodeBase64Builtin = (s, isUrl) => {
+    astr("base64", s);
+    const re = isUrl ? /^[A-Za-z0-9=_-]+$/ : /^[A-Za-z0-9=+/]+$/;
+    const alphabet2 = isUrl ? "base64url" : "base64";
+    if (s.length > 0 && !re.test(s))
+      throw new Error("invalid base64");
+    return Uint8Array.fromBase64(s, { alphabet: alphabet2, lastChunkHandling: "strict" });
   };
-  var Bech32MaxSize = 5e3;
-  var BECH32_REGEX = /[\x21-\x7E]{1,83}1[023456789acdefghjklmnpqrstuvwxyz]{6,}/;
-  function integerToUint8Array(number) {
-    const uint8Array = new Uint8Array(4);
-    uint8Array[0] = number >> 24 & 255;
-    uint8Array[1] = number >> 16 & 255;
-    uint8Array[2] = number >> 8 & 255;
-    uint8Array[3] = number & 255;
-    return uint8Array;
-  }
-  function decodeNostrURI(nip19code) {
-    try {
-      if (nip19code.startsWith("nostr:"))
-        nip19code = nip19code.substring(6);
-      return decode(nip19code);
-    } catch (_err) {
-      return { type: "invalid", data: null };
+  var base64 = hasBase64Builtin ? {
+    encode(b) {
+      abytes3(b);
+      return b.toBase64();
+    },
+    decode(s) {
+      return decodeBase64Builtin(s, false);
     }
-  }
-  function decode(code) {
-    let { prefix, words } = bech32.decode(code, Bech32MaxSize);
-    let data = new Uint8Array(bech32.fromWords(words));
-    switch (prefix) {
-      case "nprofile": {
-        let tlv = parseTLV(data);
-        if (!tlv[0]?.[0])
-          throw new Error("missing TLV 0 for nprofile");
-        if (tlv[0][0].length !== 32)
-          throw new Error("TLV 0 should be 32 bytes");
-        return {
-          type: "nprofile",
-          data: {
-            pubkey: bytesToHex(tlv[0][0]),
-            relays: tlv[1] ? tlv[1].map((d) => utf8Decoder.decode(d)) : []
-          }
-        };
-      }
-      case "nevent": {
-        let tlv = parseTLV(data);
-        if (!tlv[0]?.[0])
-          throw new Error("missing TLV 0 for nevent");
-        if (tlv[0][0].length !== 32)
-          throw new Error("TLV 0 should be 32 bytes");
-        if (tlv[2] && tlv[2][0].length !== 32)
-          throw new Error("TLV 2 should be 32 bytes");
-        if (tlv[3] && tlv[3][0].length !== 4)
-          throw new Error("TLV 3 should be 4 bytes");
-        return {
-          type: "nevent",
-          data: {
-            id: bytesToHex(tlv[0][0]),
-            relays: tlv[1] ? tlv[1].map((d) => utf8Decoder.decode(d)) : [],
-            author: tlv[2]?.[0] ? bytesToHex(tlv[2][0]) : void 0,
-            kind: tlv[3]?.[0] ? parseInt(bytesToHex(tlv[3][0]), 16) : void 0
-          }
-        };
-      }
-      case "naddr": {
-        let tlv = parseTLV(data);
-        if (!tlv[0]?.[0])
-          throw new Error("missing TLV 0 for naddr");
-        if (!tlv[2]?.[0])
-          throw new Error("missing TLV 2 for naddr");
-        if (tlv[2][0].length !== 32)
-          throw new Error("TLV 2 should be 32 bytes");
-        if (!tlv[3]?.[0])
-          throw new Error("missing TLV 3 for naddr");
-        if (tlv[3][0].length !== 4)
-          throw new Error("TLV 3 should be 4 bytes");
-        return {
-          type: "naddr",
-          data: {
-            identifier: utf8Decoder.decode(tlv[0][0]),
-            pubkey: bytesToHex(tlv[2][0]),
-            kind: parseInt(bytesToHex(tlv[3][0]), 16),
-            relays: tlv[1] ? tlv[1].map((d) => utf8Decoder.decode(d)) : []
-          }
-        };
-      }
-      case "nsec":
-        return { type: prefix, data };
-      case "npub":
-      case "note":
-        return { type: prefix, data: bytesToHex(data) };
-      default:
-        throw new Error(`unknown prefix ${prefix}`);
-    }
-  }
-  function parseTLV(data) {
-    let result = {};
-    let rest = data;
-    while (rest.length > 0) {
-      if (rest.length < 2)
-        throw new Error("not enough data to read TLV");
-      let t = rest[0];
-      let l = rest[1];
-      let v = rest.slice(2, 2 + l);
-      rest = rest.slice(2 + l);
-      if (v.length < l)
-        throw new Error(`not enough data to read on TLV ${t}`);
-      result[t] = result[t] || [];
-      result[t].push(v);
-    }
-    return result;
-  }
-  function nsecEncode(key) {
-    return encodeBytes("nsec", key);
-  }
-  function npubEncode(hex) {
-    return encodeBytes("npub", hexToBytes(hex));
-  }
-  function noteEncode(hex) {
-    return encodeBytes("note", hexToBytes(hex));
-  }
-  function encodeBech32(prefix, data) {
-    let words = bech32.toWords(data);
-    return bech32.encode(prefix, words, Bech32MaxSize);
-  }
-  function encodeBytes(prefix, bytes) {
-    return encodeBech32(prefix, bytes);
-  }
-  function nprofileEncode(profile) {
-    let data = encodeTLV({
-      0: [hexToBytes(profile.pubkey)],
-      1: (profile.relays || []).map((url) => utf8Encoder.encode(url))
-    });
-    return encodeBech32("nprofile", data);
-  }
-  function neventEncode(event) {
-    let kindArray;
-    if (event.kind !== void 0) {
-      kindArray = integerToUint8Array(event.kind);
-    }
-    let data = encodeTLV({
-      0: [hexToBytes(event.id)],
-      1: (event.relays || []).map((url) => utf8Encoder.encode(url)),
-      2: event.author ? [hexToBytes(event.author)] : [],
-      3: kindArray ? [new Uint8Array(kindArray)] : []
-    });
-    return encodeBech32("nevent", data);
-  }
-  function naddrEncode(addr) {
-    let kind = new ArrayBuffer(4);
-    new DataView(kind).setUint32(0, addr.kind, false);
-    let data = encodeTLV({
-      0: [utf8Encoder.encode(addr.identifier)],
-      1: (addr.relays || []).map((url) => utf8Encoder.encode(url)),
-      2: [hexToBytes(addr.pubkey)],
-      3: [new Uint8Array(kind)]
-    });
-    return encodeBech32("naddr", data);
-  }
-  function encodeTLV(tlv) {
-    let entries = [];
-    Object.entries(tlv).reverse().forEach(([t, vs]) => {
-      vs.forEach((v) => {
-        let entry = new Uint8Array(v.length + 2);
-        entry.set([parseInt(t)], 0);
-        entry.set([v.length], 1);
-        entry.set(v, 2);
-        entries.push(entry);
-      });
-    });
-    return concatBytes(...entries);
-  }
-  var nip04_exports = {};
-  __export2(nip04_exports, {
-    decrypt: () => decrypt2,
-    encrypt: () => encrypt2
-  });
-  function encrypt2(secretKey, pubkey, text) {
-    const privkey = secretKey instanceof Uint8Array ? secretKey : hexToBytes(secretKey);
-    const key = secp256k1.getSharedSecret(privkey, hexToBytes("02" + pubkey));
-    const normalizedKey = getNormalizedX(key);
-    let iv = Uint8Array.from(randomBytes(16));
-    let plaintext = utf8Encoder.encode(text);
-    let ciphertext = cbc(normalizedKey, iv).encrypt(plaintext);
-    let ctb64 = base64.encode(new Uint8Array(ciphertext));
-    let ivb64 = base64.encode(new Uint8Array(iv.buffer));
-    return `${ctb64}?iv=${ivb64}`;
-  }
-  function decrypt2(secretKey, pubkey, data) {
-    const privkey = secretKey instanceof Uint8Array ? secretKey : hexToBytes(secretKey);
-    let [ctb64, ivb64] = data.split("?iv=");
-    let key = secp256k1.getSharedSecret(privkey, hexToBytes("02" + pubkey));
-    let normalizedKey = getNormalizedX(key);
-    let iv = base64.decode(ivb64);
-    let ciphertext = base64.decode(ctb64);
-    let plaintext = cbc(normalizedKey, iv).decrypt(ciphertext);
-    return utf8Decoder.decode(plaintext);
-  }
-  function getNormalizedX(key) {
-    return key.slice(1, 33);
-  }
-  var nip05_exports = {};
-  __export2(nip05_exports, {
-    NIP05_REGEX: () => NIP05_REGEX,
-    isNip05: () => isNip05,
-    isValid: () => isValid,
-    queryProfile: () => queryProfile,
-    searchDomain: () => searchDomain,
-    useFetchImplementation: () => useFetchImplementation
-  });
-  var NIP05_REGEX = /^(?:([\w.+-]+)@)?([\w_-]+(\.[\w_-]+)+)$/;
-  var isNip05 = (value) => NIP05_REGEX.test(value || "");
-  var _fetch;
-  try {
-    _fetch = fetch;
-  } catch (_) {
-    null;
-  }
-  function useFetchImplementation(fetchImplementation) {
-    _fetch = fetchImplementation;
-  }
-  async function searchDomain(domain, query = "") {
-    try {
-      const url = `https://${domain}/.well-known/nostr.json?name=${query}`;
-      const res = await _fetch(url, { redirect: "manual" });
-      if (res.status !== 200) {
-        throw Error("Wrong response code");
-      }
-      const json = await res.json();
-      return json.names;
-    } catch (_) {
-      return {};
-    }
-  }
-  async function queryProfile(fullname) {
-    const match = fullname.match(NIP05_REGEX);
-    if (!match)
-      return null;
-    const [, name = "_", domain] = match;
-    try {
-      const url = `https://${domain}/.well-known/nostr.json?name=${name}`;
-      const res = await _fetch(url, { redirect: "manual" });
-      if (res.status !== 200) {
-        throw Error("Wrong response code");
-      }
-      const json = await res.json();
-      const pubkey = json.names[name];
-      return pubkey ? { pubkey, relays: json.relays?.[pubkey] } : null;
-    } catch (_e) {
-      return null;
-    }
-  }
-  async function isValid(pubkey, nip05) {
-    const res = await queryProfile(nip05);
-    return res ? res.pubkey === pubkey : false;
-  }
-  var nip10_exports = {};
-  __export2(nip10_exports, {
-    parse: () => parse
-  });
-  var HEX64 = /^[0-9a-fA-F]{64}$/;
-  function parse(event) {
-    const result = {
-      reply: void 0,
-      root: void 0,
-      mentions: [],
-      profiles: [],
-      quotes: []
-    };
-    let maybeParent;
-    let maybeRoot;
-    for (let i2 = event.tags.length - 1; i2 >= 0; i2--) {
-      const tag = event.tags[i2];
-      if (tag[0] === "e" && tag[1] && HEX64.test(tag[1])) {
-        const [_, eTagEventId, eTagRelayUrl, eTagMarker, eTagAuthor] = tag;
-        const eventPointer = {
-          id: eTagEventId,
-          relays: eTagRelayUrl ? [eTagRelayUrl] : [],
-          author: eTagAuthor && HEX64.test(eTagAuthor) ? eTagAuthor : void 0
-        };
-        if (eTagMarker === "root") {
-          result.root = eventPointer;
-          continue;
-        }
-        if (eTagMarker === "reply") {
-          result.reply = eventPointer;
-          continue;
-        }
-        if (eTagMarker === "mention") {
-          result.mentions.push(eventPointer);
-          continue;
-        }
-        if (!maybeParent) {
-          maybeParent = eventPointer;
-        } else {
-          maybeRoot = eventPointer;
-        }
-        result.mentions.push(eventPointer);
-        continue;
-      }
-      if (tag[0] === "q" && tag[1] && HEX64.test(tag[1])) {
-        const [_, eTagEventId, eTagRelayUrl] = tag;
-        result.quotes.push({
-          id: eTagEventId,
-          relays: eTagRelayUrl ? [eTagRelayUrl] : []
-        });
-      }
-      if (tag[0] === "p" && tag[1] && HEX64.test(tag[1])) {
-        result.profiles.push({
-          pubkey: tag[1],
-          relays: tag[2] ? [tag[2]] : []
-        });
-        continue;
-      }
-    }
-    if (!result.root) {
-      result.root = maybeRoot || maybeParent || result.reply;
-    }
-    if (!result.reply) {
-      result.reply = maybeParent || result.root;
-    }
-    ;
-    [result.reply, result.root].forEach((ref) => {
-      if (!ref)
-        return;
-      let idx = result.mentions.indexOf(ref);
-      if (idx !== -1) {
-        result.mentions.splice(idx, 1);
-      }
-      if (ref.author) {
-        let author = result.profiles.find((p) => p.pubkey === ref.author);
-        if (author && author.relays) {
-          if (!ref.relays) {
-            ref.relays = [];
-          }
-          author.relays.forEach((url) => {
-            if (ref.relays?.indexOf(url) === -1)
-              ref.relays.push(url);
-          });
-          author.relays = ref.relays;
-        }
-      }
-    });
-    result.mentions.forEach((ref) => {
-      if (ref.author) {
-        let author = result.profiles.find((p) => p.pubkey === ref.author);
-        if (author && author.relays) {
-          if (!ref.relays) {
-            ref.relays = [];
-          }
-          author.relays.forEach((url) => {
-            if (ref.relays.indexOf(url) === -1)
-              ref.relays.push(url);
-          });
-          author.relays = ref.relays;
-        }
-      }
-    });
-    return result;
-  }
-  var nip11_exports = {};
-  __export2(nip11_exports, {
-    fetchRelayInformation: () => fetchRelayInformation,
-    useFetchImplementation: () => useFetchImplementation2
-  });
-  var _fetch2;
-  try {
-    _fetch2 = fetch;
-  } catch {
-  }
-  function useFetchImplementation2(fetchImplementation) {
-    _fetch2 = fetchImplementation;
-  }
-  async function fetchRelayInformation(url) {
-    return await (await fetch(url.replace("ws://", "http://").replace("wss://", "https://"), {
-      headers: { Accept: "application/nostr+json" }
-    })).json();
-  }
-  var nip13_exports = {};
-  __export2(nip13_exports, {
-    getPow: () => getPow,
-    minePow: () => minePow
-  });
-  function getPow(hex) {
-    let count = 0;
-    for (let i2 = 0; i2 < 64; i2 += 8) {
-      const nibble = parseInt(hex.substring(i2, i2 + 8), 16);
-      if (nibble === 0) {
-        count += 32;
-      } else {
-        count += Math.clz32(nibble);
-        break;
-      }
-    }
-    return count;
-  }
-  function getPowFromBytes(hash) {
-    let count = 0;
-    for (let i2 = 0; i2 < hash.length; i2++) {
-      const byte = hash[i2];
-      if (byte === 0) {
-        count += 8;
-      } else {
-        count += Math.clz32(byte) - 24;
-        break;
-      }
-    }
-    return count;
-  }
-  function minePow(unsigned, difficulty) {
-    let count = 0;
-    const event = unsigned;
-    const tag = ["nonce", count.toString(), difficulty.toString()];
-    event.tags.push(tag);
-    while (true) {
-      const now2 = Math.floor((/* @__PURE__ */ new Date()).getTime() / 1e3);
-      if (now2 !== event.created_at) {
-        count = 0;
-        event.created_at = now2;
-      }
-      tag[1] = (++count).toString();
-      const hash = sha256(
-        utf8Encoder.encode(JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]))
-      );
-      if (getPowFromBytes(hash) >= difficulty) {
-        event.id = bytesToHex(hash);
-        break;
-      }
-    }
-    return event;
-  }
-  var nip17_exports = {};
-  __export2(nip17_exports, {
-    unwrapEvent: () => unwrapEvent2,
-    unwrapManyEvents: () => unwrapManyEvents2,
-    wrapEvent: () => wrapEvent2,
-    wrapManyEvents: () => wrapManyEvents2
-  });
-  var nip59_exports = {};
-  __export2(nip59_exports, {
-    createRumor: () => createRumor,
-    createSeal: () => createSeal,
-    createWrap: () => createWrap,
-    unwrapEvent: () => unwrapEvent,
-    unwrapManyEvents: () => unwrapManyEvents,
-    wrapEvent: () => wrapEvent,
-    wrapManyEvents: () => wrapManyEvents
-  });
-  var nip44_exports = {};
-  __export2(nip44_exports, {
-    decrypt: () => decrypt22,
-    encrypt: () => encrypt22,
-    getConversationKey: () => getConversationKey,
-    v2: () => v2
-  });
+  } : /* @__PURE__ */ chain(/* @__PURE__ */ radix2(6), /* @__PURE__ */ alphabet("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"), /* @__PURE__ */ padding(6), /* @__PURE__ */ join(""));
+
+  // node_modules/nostr-tools/lib/esm/nip44.js
+  var utf8Decoder2 = new TextDecoder("utf-8");
+  var utf8Encoder2 = new TextEncoder();
   var minPlaintextSize = 1;
   var maxPlaintextSize = 4294967295;
   var extendedPrefixThreshold = 65536;
   function getConversationKey(privkeyA, pubkeyB) {
     const sharedX = secp256k1.getSharedSecret(privkeyA, hexToBytes("02" + pubkeyB)).subarray(1, 33);
-    return extract(sha256, sharedX, utf8Encoder.encode("nip44-v2"));
+    return extract(sha256, sharedX, utf8Encoder2.encode("nip44-v2"));
   }
   function getMessageKeys(conversationKey, nonce) {
     const keys = expand(sha256, conversationKey, nonce, 76);
@@ -4928,7 +3552,7 @@ var CoralieCore = (() => {
     return arr;
   }
   function pad(plaintext) {
-    const unpadded = utf8Encoder.encode(plaintext);
+    const unpadded = utf8Encoder2.encode(plaintext);
     const unpaddedLen = unpadded.length;
     if (unpaddedLen < minPlaintextSize || unpaddedLen > maxPlaintextSize)
       throw new Error("invalid plaintext size: must be between 1 and 4294967295 bytes");
@@ -4953,7 +3577,7 @@ var CoralieCore = (() => {
     const unpadded = padded.subarray(prefixLen, prefixLen + unpaddedLen);
     if (unpaddedLen < minPlaintextSize || unpaddedLen > maxPlaintextSize || unpadded.length !== unpaddedLen || padded.length !== prefixLen + calcPaddedLen(unpaddedLen))
       throw new Error("invalid padding");
-    return utf8Decoder.decode(unpadded);
+    return utf8Decoder2.decode(unpadded);
   }
   function hmacAad(key, message, aad) {
     if (aad.length !== 32)
@@ -4987,14 +3611,14 @@ var CoralieCore = (() => {
       mac: data.subarray(-32)
     };
   }
-  function encrypt22(plaintext, conversationKey, nonce = randomBytes(32)) {
+  function encrypt(plaintext, conversationKey, nonce = randomBytes(32)) {
     const { chacha_key, chacha_nonce, hmac_key } = getMessageKeys(conversationKey, nonce);
     const padded = pad(plaintext);
     const ciphertext = chacha20(chacha_key, chacha_nonce, padded);
     const mac = hmacAad(hmac_key, ciphertext, nonce);
     return base64.encode(concatBytes(new Uint8Array([2]), nonce, ciphertext, mac));
   }
-  function decrypt22(payload, conversationKey) {
+  function decrypt(payload, conversationKey) {
     const { nonce, ciphertext, mac } = decodePayload(payload);
     const { chacha_key, chacha_nonce, hmac_key } = getMessageKeys(conversationKey, nonce);
     const calculatedMac = hmacAad(hmac_key, ciphertext, nonce);
@@ -5010,1610 +3634,885 @@ var CoralieCore = (() => {
       pad,
       unpad
     },
-    encrypt: encrypt22,
-    decrypt: decrypt22
+    encrypt,
+    decrypt
   };
-  var TWO_DAYS = 2 * 24 * 60 * 60;
-  var now = () => Math.round(Date.now() / 1e3);
-  var randomNow = () => Math.round(now() - Math.random() * TWO_DAYS);
-  var nip44ConversationKey = (privateKey, publicKey) => getConversationKey(privateKey, publicKey);
-  var nip44Encrypt = (data, privateKey, publicKey) => encrypt22(JSON.stringify(data), nip44ConversationKey(privateKey, publicKey));
-  var nip44Decrypt = (data, privateKey) => JSON.parse(decrypt22(data.content, nip44ConversationKey(privateKey, data.pubkey)));
-  function createRumor(event, privateKey) {
-    const rumor = {
-      created_at: now(),
-      content: "",
-      tags: [],
-      ...event,
-      pubkey: getPublicKey(privateKey)
-    };
-    rumor.id = getEventHash(rumor);
-    return rumor;
-  }
-  function createSeal(rumor, privateKey, recipientPublicKey) {
-    return finalizeEvent(
-      {
-        kind: Seal,
-        content: nip44Encrypt(rumor, privateKey, recipientPublicKey),
-        created_at: randomNow(),
-        tags: []
-      },
-      privateKey
-    );
-  }
-  function createWrap(seal, recipientPublicKey) {
-    const randomKey = generateSecretKey();
-    return finalizeEvent(
-      {
-        kind: GiftWrap,
-        content: nip44Encrypt(seal, randomKey, recipientPublicKey),
-        created_at: randomNow(),
-        tags: [["p", recipientPublicKey]]
-      },
-      randomKey
-    );
-  }
-  function wrapEvent(event, senderPrivateKey, recipientPublicKey) {
-    const rumor = createRumor(event, senderPrivateKey);
-    const seal = createSeal(rumor, senderPrivateKey, recipientPublicKey);
-    return createWrap(seal, recipientPublicKey);
-  }
-  function wrapManyEvents(event, senderPrivateKey, recipientsPublicKeys) {
-    if (!recipientsPublicKeys || recipientsPublicKeys.length === 0) {
-      throw new Error("At least one recipient is required.");
-    }
-    const senderPublicKey = getPublicKey(senderPrivateKey);
-    const wrappeds = [wrapEvent(event, senderPrivateKey, senderPublicKey)];
-    recipientsPublicKeys.forEach((recipientPublicKey) => {
-      wrappeds.push(wrapEvent(event, senderPrivateKey, recipientPublicKey));
-    });
-    return wrappeds;
-  }
-  function unwrapEvent(wrap, recipientPrivateKey) {
-    const unwrappedSeal = nip44Decrypt(wrap, recipientPrivateKey);
-    return nip44Decrypt(unwrappedSeal, recipientPrivateKey);
-  }
-  function unwrapManyEvents(wrappedEvents, recipientPrivateKey) {
-    let unwrappedEvents = [];
-    wrappedEvents.forEach((e) => {
-      unwrappedEvents.push(unwrapEvent(e, recipientPrivateKey));
-    });
-    unwrappedEvents.sort((a, b) => a.created_at - b.created_at);
-    return unwrappedEvents;
-  }
-  function createEvent(recipients, message, conversationTitle, replyTo) {
-    const baseEvent = {
-      created_at: Math.ceil(Date.now() / 1e3),
-      kind: PrivateDirectMessage,
-      tags: [],
-      content: message
-    };
-    const recipientsArray = Array.isArray(recipients) ? recipients : [recipients];
-    recipientsArray.forEach(({ publicKey, relayUrl }) => {
-      baseEvent.tags.push(relayUrl ? ["p", publicKey, relayUrl] : ["p", publicKey]);
-    });
-    if (replyTo) {
-      baseEvent.tags.push(["e", replyTo.eventId, replyTo.relayUrl || "", "reply"]);
-    }
-    if (conversationTitle) {
-      baseEvent.tags.push(["subject", conversationTitle]);
-    }
-    return baseEvent;
-  }
-  function wrapEvent2(senderPrivateKey, recipient, message, conversationTitle, replyTo) {
-    const event = createEvent(recipient, message, conversationTitle, replyTo);
-    return wrapEvent(event, senderPrivateKey, recipient.publicKey);
-  }
-  function wrapManyEvents2(senderPrivateKey, recipients, message, conversationTitle, replyTo) {
-    if (!recipients || recipients.length === 0) {
-      throw new Error("At least one recipient is required.");
-    }
-    const senderPublicKey = getPublicKey(senderPrivateKey);
-    return [{ publicKey: senderPublicKey }, ...recipients].map(
-      (recipient) => wrapEvent2(senderPrivateKey, recipient, message, conversationTitle, replyTo)
-    );
-  }
-  var unwrapEvent2 = unwrapEvent;
-  var unwrapManyEvents2 = unwrapManyEvents;
-  var nip18_exports = {};
-  __export2(nip18_exports, {
-    finishRepostEvent: () => finishRepostEvent,
-    getRepostedEvent: () => getRepostedEvent,
-    getRepostedEventPointer: () => getRepostedEventPointer
-  });
-  function finishRepostEvent(t, reposted, relayUrl, privateKey) {
-    let kind;
-    const tags = [...t.tags ?? [], ["e", reposted.id, relayUrl], ["p", reposted.pubkey]];
-    if (reposted.kind === ShortTextNote) {
-      kind = Repost;
-    } else {
-      kind = GenericRepost;
-      tags.push(["k", String(reposted.kind)]);
-    }
-    return finalizeEvent(
-      {
-        kind,
-        tags,
-        content: t.content === "" || reposted.tags?.find((tag) => tag[0] === "-") ? "" : JSON.stringify(reposted),
-        created_at: t.created_at
-      },
-      privateKey
-    );
-  }
-  function getRepostedEventPointer(event) {
-    if (![Repost, GenericRepost].includes(event.kind)) {
-      return void 0;
-    }
-    let lastETag;
-    let lastPTag;
-    for (let i2 = event.tags.length - 1; i2 >= 0 && (lastETag === void 0 || lastPTag === void 0); i2--) {
-      const tag = event.tags[i2];
-      if (tag.length >= 2) {
-        if (tag[0] === "e" && lastETag === void 0) {
-          lastETag = tag;
-        } else if (tag[0] === "p" && lastPTag === void 0) {
-          lastPTag = tag;
-        }
-      }
-    }
-    if (lastETag === void 0) {
-      return void 0;
-    }
-    return {
-      id: lastETag[1],
-      relays: [lastETag[2], lastPTag?.[2]].filter((x) => typeof x === "string"),
-      author: lastPTag?.[1]
-    };
-  }
-  function getRepostedEvent(event, { skipVerification } = {}) {
-    const pointer = getRepostedEventPointer(event);
-    if (pointer === void 0 || event.content === "") {
-      return void 0;
-    }
-    let repostedEvent;
-    try {
-      repostedEvent = JSON.parse(event.content);
-    } catch (error) {
-      return void 0;
-    }
-    if (repostedEvent.id !== pointer.id) {
-      return void 0;
-    }
-    if (!skipVerification && !verifyEvent(repostedEvent)) {
-      return void 0;
-    }
-    return repostedEvent;
-  }
-  var nip21_exports = {};
-  __export2(nip21_exports, {
-    NOSTR_URI_REGEX: () => NOSTR_URI_REGEX,
-    parse: () => parse2,
-    test: () => test
-  });
-  var NOSTR_URI_REGEX = new RegExp(`nostr:(${BECH32_REGEX.source})`);
-  function test(value) {
-    return typeof value === "string" && new RegExp(`^${NOSTR_URI_REGEX.source}$`).test(value);
-  }
-  function parse2(uri) {
-    const match = uri.match(new RegExp(`^${NOSTR_URI_REGEX.source}$`));
-    if (!match)
-      throw new Error(`Invalid Nostr URI: ${uri}`);
-    return {
-      uri: match[0],
-      value: match[1],
-      decoded: decode(match[1])
-    };
-  }
-  var nip22_exports = {};
-  __export2(nip22_exports, {
-    parse: () => parse3
-  });
-  var HEX642 = /^[0-9a-fA-F]{64}$/;
-  function parseKind(kind) {
-    if (!kind)
-      return void 0;
-    return /^\d+$/.test(kind) ? parseInt(kind, 10) : kind;
-  }
-  function parseAddressPointer(value, relayUrl) {
-    const idx = value.indexOf(":");
-    const idx2 = value.indexOf(":", idx + 1);
-    if (idx === -1 || idx2 === -1)
-      return void 0;
-    const kind = parseInt(value.slice(0, idx), 10);
-    if (Number.isNaN(kind))
-      return void 0;
-    const pubkey = value.slice(idx + 1, idx2);
-    if (!HEX642.test(pubkey))
-      return void 0;
-    return {
-      kind,
-      pubkey,
-      identifier: value.slice(idx2 + 1),
-      relays: relayUrl ? [relayUrl] : []
-    };
-  }
-  function parsePointer(tag) {
-    switch (tag[0]) {
-      case "E":
-      case "e":
-        if (!tag[1] || !HEX642.test(tag[1]))
-          return void 0;
-        return {
-          id: tag[1],
-          relays: tag[2] ? [tag[2]] : [],
-          author: tag[3] && HEX642.test(tag[3]) ? tag[3] : void 0
-        };
-      case "A":
-      case "a":
-        if (!tag[1])
-          return void 0;
-        return parseAddressPointer(tag[1], tag[2]);
-      case "I":
-      case "i":
-        if (!tag[1])
-          return void 0;
-        return {
-          value: tag[1],
-          hint: tag[2]
-        };
-    }
-  }
-  function parseQuote(tag) {
-    if (!tag[1])
-      return void 0;
-    if (tag[1].includes(":")) {
-      return parseAddressPointer(tag[1], tag[2]);
-    }
-    if (!HEX642.test(tag[1]))
-      return void 0;
-    return {
-      id: tag[1],
-      relays: tag[2] ? [tag[2]] : [],
-      author: tag[3] && HEX642.test(tag[3]) ? tag[3] : void 0
-    };
-  }
-  function choosePointer(candidates) {
-    return candidates.findLast((candidate) => candidate.tagName === "A" || candidate.tagName === "a")?.pointer || candidates.findLast((candidate) => candidate.tagName === "I" || candidate.tagName === "i")?.pointer || candidates.findLast((candidate) => candidate.tagName === "E" || candidate.tagName === "e")?.pointer;
-  }
-  function inheritRelayHints(pointer, profiles) {
-    if (!pointer || !("id" in pointer) || !pointer.author)
-      return;
-    const author = profiles.find((profile) => profile.pubkey === pointer.author);
-    if (!author || !author.relays)
-      return;
-    if (!pointer.relays) {
-      pointer.relays = [];
-    }
-    author.relays.forEach((url) => {
-      if (pointer.relays.indexOf(url) === -1)
-        pointer.relays.push(url);
-    });
-    author.relays = pointer.relays;
-  }
-  function parse3(event) {
-    const result = {
-      root: void 0,
-      rootKind: void 0,
-      reply: void 0,
-      replyKind: void 0,
-      mentions: [],
-      quotes: [],
-      profiles: []
-    };
-    const rootCandidates = [];
-    const replyCandidates = [];
-    for (const tag of event.tags) {
-      if ((tag[0] === "E" || tag[0] === "A" || tag[0] === "I") && tag[1]) {
-        const pointer = parsePointer(tag);
-        if (pointer)
-          rootCandidates.push({ tagName: tag[0], pointer });
-        continue;
-      }
-      if ((tag[0] === "e" || tag[0] === "a" || tag[0] === "i") && tag[1]) {
-        const pointer = parsePointer(tag);
-        if (pointer)
-          replyCandidates.push({ tagName: tag[0], pointer });
-        continue;
-      }
-      if (tag[0] === "K") {
-        result.rootKind = parseKind(tag[1]);
-        continue;
-      }
-      if (tag[0] === "k") {
-        result.replyKind = parseKind(tag[1]);
-        continue;
-      }
-      if (tag[0] === "q") {
-        const pointer = parseQuote(tag);
-        if (pointer)
-          result.quotes.push(pointer);
-        continue;
-      }
-      if ((tag[0] === "P" || tag[0] === "p") && tag[1] && HEX642.test(tag[1])) {
-        result.profiles.push({
-          pubkey: tag[1],
-          relays: tag[2] ? [tag[2]] : []
-        });
-      }
-    }
-    result.root = choosePointer(rootCandidates);
-    result.reply = choosePointer(replyCandidates);
-    inheritRelayHints(result.root, result.profiles);
-    inheritRelayHints(result.reply, result.profiles);
-    result.quotes.forEach((pointer) => inheritRelayHints(pointer, result.profiles));
-    return result;
-  }
-  var nip25_exports = {};
-  __export2(nip25_exports, {
-    finishReactionEvent: () => finishReactionEvent,
-    getReactedEventPointer: () => getReactedEventPointer
-  });
-  function finishReactionEvent(t, reacted, privateKey) {
-    const inheritedTags = reacted.tags.filter((tag) => tag.length >= 2 && (tag[0] === "e" || tag[0] === "p"));
-    return finalizeEvent(
-      {
-        ...t,
-        kind: Reaction,
-        tags: [...t.tags ?? [], ...inheritedTags, ["e", reacted.id], ["p", reacted.pubkey]],
-        content: t.content ?? "+"
-      },
-      privateKey
-    );
-  }
-  function getReactedEventPointer(event) {
-    if (event.kind !== Reaction) {
-      return void 0;
-    }
-    let lastETag;
-    let lastPTag;
-    for (let i2 = event.tags.length - 1; i2 >= 0 && (lastETag === void 0 || lastPTag === void 0); i2--) {
-      const tag = event.tags[i2];
-      if (tag.length >= 2) {
-        if (tag[0] === "e" && lastETag === void 0) {
-          lastETag = tag;
-        } else if (tag[0] === "p" && lastPTag === void 0) {
-          lastPTag = tag;
-        }
-      }
-    }
-    if (lastETag === void 0 || lastPTag === void 0) {
-      return void 0;
-    }
-    return {
-      id: lastETag[1],
-      relays: [lastETag[2], lastPTag[2]].filter((x) => x !== void 0),
-      author: lastPTag[1]
-    };
-  }
-  var nip27_exports = {};
-  __export2(nip27_exports, {
-    parse: () => parse4
-  });
-  var noCharacter = /\W/m;
-  var noURLCharacter = /[^\w\/] |[^\w\/]$|$|,| /m;
-  var MAX_HASHTAG_LENGTH = 42;
-  function* parse4(content) {
-    let emojis = [];
-    if (typeof content !== "string") {
-      for (let i2 = 0; i2 < content.tags.length; i2++) {
-        const tag = content.tags[i2];
-        if (tag[0] === "emoji" && tag.length >= 3) {
-          emojis.push({ type: "emoji", shortcode: tag[1], url: tag[2] });
-        }
-      }
-      content = content.content;
-    }
-    const max = content.length;
-    let prevIndex = 0;
-    let index = 0;
-    mainloop:
-      while (index < max) {
-        const u = content.indexOf(":", index);
-        const h = content.indexOf("#", index);
-        if (u === -1 && h === -1) {
-          break mainloop;
-        }
-        if (u === -1 || h >= 0 && h < u) {
-          if (h === 0 || content[h - 1].match(noCharacter)) {
-            const m = content.slice(h + 1, h + MAX_HASHTAG_LENGTH).match(noCharacter);
-            const end = m ? h + 1 + m.index : max;
-            yield { type: "text", text: content.slice(prevIndex, h) };
-            yield { type: "hashtag", value: content.slice(h + 1, end) };
-            index = end;
-            prevIndex = index;
-            continue mainloop;
-          }
-          index = h + 1;
-          continue mainloop;
-        }
-        if (content.slice(u - 5, u) === "nostr") {
-          const m = content.slice(u + 60).match(noCharacter);
-          const end = m ? u + 60 + m.index : max;
-          try {
-            let pointer;
-            let { data, type } = decode(content.slice(u + 1, end));
-            switch (type) {
-              case "npub":
-                pointer = { pubkey: data };
-                break;
-              case "note":
-                pointer = { id: data };
-                break;
-              case "nsec":
-                index = end + 1;
-                continue;
-              default:
-                pointer = data;
-            }
-            if (prevIndex !== u - 5) {
-              yield { type: "text", text: content.slice(prevIndex, u - 5) };
-            }
-            yield { type: "reference", pointer };
-            index = end;
-            prevIndex = index;
-            continue mainloop;
-          } catch (_err) {
-            index = u + 1;
-            continue mainloop;
-          }
-        } else if (content.slice(u - 5, u) === "https" || content.slice(u - 4, u) === "http") {
-          const m = content.slice(u + 4).match(noURLCharacter);
-          const end = m ? u + 4 + m.index : max;
-          const prefixLen = content[u - 1] === "s" ? 5 : 4;
-          try {
-            let url = new URL(content.slice(u - prefixLen, end));
-            if (url.hostname.indexOf(".") === -1) {
-              throw new Error("invalid url");
-            }
-            if (prevIndex !== u - prefixLen) {
-              yield { type: "text", text: content.slice(prevIndex, u - prefixLen) };
-            }
-            if (/\.(png|jpe?g|gif|webp|heic|svg)$/i.test(url.pathname)) {
-              yield { type: "image", url: url.toString() };
-              index = end;
-              prevIndex = index;
-              continue mainloop;
-            }
-            if (/\.(mp4|avi|webm|mkv|mov)$/i.test(url.pathname)) {
-              yield { type: "video", url: url.toString() };
-              index = end;
-              prevIndex = index;
-              continue mainloop;
-            }
-            if (/\.(mp3|aac|ogg|opus|wav|flac)$/i.test(url.pathname)) {
-              yield { type: "audio", url: url.toString() };
-              index = end;
-              prevIndex = index;
-              continue mainloop;
-            }
-            yield { type: "url", url: url.toString() };
-            index = end;
-            prevIndex = index;
-            continue mainloop;
-          } catch (_err) {
-            index = end + 1;
-            continue mainloop;
-          }
-        } else if (content.slice(u - 3, u) === "wss" || content.slice(u - 2, u) === "ws") {
-          const m = content.slice(u + 4).match(noURLCharacter);
-          const end = m ? u + 4 + m.index : max;
-          const prefixLen = content[u - 1] === "s" ? 3 : 2;
-          try {
-            let url = new URL(content.slice(u - prefixLen, end));
-            if (url.hostname.indexOf(".") === -1) {
-              throw new Error("invalid ws url");
-            }
-            if (prevIndex !== u - prefixLen) {
-              yield { type: "text", text: content.slice(prevIndex, u - prefixLen) };
-            }
-            yield { type: "relay", url: url.toString() };
-            index = end;
-            prevIndex = index;
-            continue mainloop;
-          } catch (_err) {
-            index = end + 1;
-            continue mainloop;
-          }
-        } else {
-          for (let e = 0; e < emojis.length; e++) {
-            const emoji = emojis[e];
-            if (content[u + emoji.shortcode.length + 1] === ":" && content.slice(u + 1, u + emoji.shortcode.length + 1) === emoji.shortcode) {
-              if (prevIndex !== u) {
-                yield { type: "text", text: content.slice(prevIndex, u) };
-              }
-              yield emoji;
-              index = u + emoji.shortcode.length + 2;
-              prevIndex = index;
-              continue mainloop;
-            }
-          }
-          index = u + 1;
-          continue mainloop;
-        }
-      }
-    if (prevIndex !== max) {
-      yield { type: "text", text: content.slice(prevIndex) };
-    }
-  }
-  var nip28_exports = {};
-  __export2(nip28_exports, {
-    channelCreateEvent: () => channelCreateEvent,
-    channelHideMessageEvent: () => channelHideMessageEvent,
-    channelMessageEvent: () => channelMessageEvent,
-    channelMetadataEvent: () => channelMetadataEvent,
-    channelMuteUserEvent: () => channelMuteUserEvent
-  });
-  var channelCreateEvent = (t, privateKey) => {
-    let content;
-    if (typeof t.content === "object") {
-      content = JSON.stringify(t.content);
-    } else if (typeof t.content === "string") {
-      content = t.content;
-    } else {
-      return void 0;
-    }
-    return finalizeEvent(
-      {
-        kind: ChannelCreation,
-        tags: [...t.tags ?? []],
-        content,
-        created_at: t.created_at
-      },
-      privateKey
-    );
-  };
-  var channelMetadataEvent = (t, privateKey) => {
-    let content;
-    if (typeof t.content === "object") {
-      content = JSON.stringify(t.content);
-    } else if (typeof t.content === "string") {
-      content = t.content;
-    } else {
-      return void 0;
-    }
-    return finalizeEvent(
-      {
-        kind: ChannelMetadata,
-        tags: [["e", t.channel_create_event_id], ...t.tags ?? []],
-        content,
-        created_at: t.created_at
-      },
-      privateKey
-    );
-  };
-  var channelMessageEvent = (t, privateKey) => {
-    const tags = [["e", t.channel_create_event_id, t.relay_url, "root"]];
-    if (t.reply_to_channel_message_event_id) {
-      tags.push(["e", t.reply_to_channel_message_event_id, t.relay_url, "reply"]);
-    }
-    return finalizeEvent(
-      {
-        kind: ChannelMessage,
-        tags: [...tags, ...t.tags ?? []],
-        content: t.content,
-        created_at: t.created_at
-      },
-      privateKey
-    );
-  };
-  var channelHideMessageEvent = (t, privateKey) => {
-    let content;
-    if (typeof t.content === "object") {
-      content = JSON.stringify(t.content);
-    } else if (typeof t.content === "string") {
-      content = t.content;
-    } else {
-      return void 0;
-    }
-    return finalizeEvent(
-      {
-        kind: ChannelHideMessage,
-        tags: [["e", t.channel_message_event_id], ...t.tags ?? []],
-        content,
-        created_at: t.created_at
-      },
-      privateKey
-    );
-  };
-  var channelMuteUserEvent = (t, privateKey) => {
-    let content;
-    if (typeof t.content === "object") {
-      content = JSON.stringify(t.content);
-    } else if (typeof t.content === "string") {
-      content = t.content;
-    } else {
-      return void 0;
-    }
-    return finalizeEvent(
-      {
-        kind: ChannelMuteUser,
-        tags: [["p", t.pubkey_to_mute], ...t.tags ?? []],
-        content,
-        created_at: t.created_at
-      },
-      privateKey
-    );
-  };
-  var nip30_exports = {};
-  __export2(nip30_exports, {
-    EMOJI_SHORTCODE_REGEX: () => EMOJI_SHORTCODE_REGEX,
-    matchAll: () => matchAll,
-    regex: () => regex,
-    replaceAll: () => replaceAll
-  });
-  var EMOJI_SHORTCODE_REGEX = /:(\w+):/;
-  var regex = () => new RegExp(`\\B${EMOJI_SHORTCODE_REGEX.source}\\B`, "g");
-  function* matchAll(content) {
-    const matches = content.matchAll(regex());
-    for (const match of matches) {
-      try {
-        const [shortcode, name] = match;
-        yield {
-          shortcode,
-          name,
-          start: match.index,
-          end: match.index + shortcode.length
-        };
-      } catch (_e) {
-      }
-    }
-  }
-  function replaceAll(content, replacer) {
-    return content.replaceAll(regex(), (shortcode, name) => {
-      return replacer({
-        shortcode,
-        name
-      });
-    });
-  }
-  var nip39_exports = {};
-  __export2(nip39_exports, {
-    useFetchImplementation: () => useFetchImplementation3,
-    validateGithub: () => validateGithub
-  });
-  var _fetch3;
-  try {
-    _fetch3 = fetch;
-  } catch {
-  }
-  function useFetchImplementation3(fetchImplementation) {
-    _fetch3 = fetchImplementation;
-  }
-  async function validateGithub(pubkey, username, proof) {
-    try {
-      let res = await (await _fetch3(`https://gist.github.com/${username}/${proof}/raw`)).text();
-      return res === `Verifying that I control the following Nostr public key: ${pubkey}`;
-    } catch (_) {
-      return false;
-    }
-  }
-  var nip47_exports = {};
-  __export2(nip47_exports, {
-    makeNwcRequestEvent: () => makeNwcRequestEvent,
-    parseConnectionString: () => parseConnectionString
-  });
-  function parseConnectionString(connectionString) {
-    const { host, pathname, searchParams } = new URL(connectionString);
-    const pubkey = pathname || host;
-    const relays = searchParams.getAll("relay");
-    const secret = searchParams.get("secret");
-    if (!pubkey || relays.length === 0 || !secret) {
-      throw new Error("invalid connection string");
-    }
-    return { pubkey, relay: relays[0], relays, secret };
-  }
-  async function makeNwcRequestEvent(pubkey, secretKey, invoice) {
-    const content = {
-      method: "pay_invoice",
-      params: {
-        invoice
-      }
-    };
-    const encryptedContent = encrypt2(secretKey, pubkey, JSON.stringify(content));
-    const eventTemplate = {
-      kind: NWCWalletRequest,
-      created_at: Math.round(Date.now() / 1e3),
-      content: encryptedContent,
-      tags: [["p", pubkey]]
-    };
-    return finalizeEvent(eventTemplate, secretKey);
-  }
-  var nip54_exports = {};
-  __export2(nip54_exports, {
-    normalizeIdentifier: () => normalizeIdentifier
-  });
-  function normalizeIdentifier(name) {
-    name = name.trim().toLowerCase();
-    name = name.normalize("NFKC");
-    return Array.from(name).map((char) => {
-      if (/\p{Letter}/u.test(char) || /\p{Number}/u.test(char)) {
-        return char;
-      }
-      return "-";
-    }).join("");
-  }
-  var nip57_exports = {};
-  __export2(nip57_exports, {
-    getSatoshisAmountFromBolt11: () => getSatoshisAmountFromBolt11,
-    getZapEndpoint: () => getZapEndpoint,
-    makeZapReceipt: () => makeZapReceipt,
-    makeZapRequest: () => makeZapRequest,
-    useFetchImplementation: () => useFetchImplementation4,
-    validateZapRequest: () => validateZapRequest
-  });
-  var _fetch4;
-  try {
-    _fetch4 = fetch;
-  } catch {
-  }
-  function useFetchImplementation4(fetchImplementation) {
-    _fetch4 = fetchImplementation;
-  }
-  async function getZapEndpoint(metadata) {
-    try {
-      let lnurl = "";
-      let { lud06, lud16 } = JSON.parse(metadata.content);
-      if (lud16) {
-        let [name, domain] = lud16.split("@");
-        lnurl = new URL(`/.well-known/lnurlp/${name}`, `https://${domain}`).toString();
-      } else if (lud06) {
-        let { words } = bech32.decode(lud06, 1e3);
-        let data = bech32.fromWords(words);
-        lnurl = utf8Decoder.decode(data);
-      } else {
-        return null;
-      }
-      let res = await _fetch4(lnurl);
-      let body = await res.json();
-      if (body.allowsNostr && body.nostrPubkey) {
-        return body.callback;
-      }
-    } catch (err) {
-    }
-    return null;
-  }
-  function makeZapRequest(params) {
-    let zr = {
-      kind: 9734,
-      created_at: Math.round(Date.now() / 1e3),
-      content: params.comment || "",
-      tags: [
-        ["p", "pubkey" in params ? params.pubkey : params.event.pubkey],
-        ["amount", params.amount.toString()],
-        ["relays", ...params.relays]
-      ]
-    };
-    if ("event" in params) {
-      zr.tags.push(["e", params.event.id]);
-      if (isReplaceableKind(params.event.kind)) {
-        const a = ["a", `${params.event.kind}:${params.event.pubkey}:`];
-        zr.tags.push(a);
-      } else if (isAddressableKind(params.event.kind)) {
-        let d = params.event.tags.find(([t, v]) => t === "d" && v);
-        if (!d)
-          throw new Error("d tag not found or is empty");
-        const a = ["a", `${params.event.kind}:${params.event.pubkey}:${d[1]}`];
-        zr.tags.push(a);
-      }
-      zr.tags.push(["k", params.event.kind.toString()]);
-    }
-    return zr;
-  }
-  function validateZapRequest(zapRequestString) {
-    let zapRequest;
-    try {
-      zapRequest = JSON.parse(zapRequestString);
-    } catch (err) {
-      return "Invalid zap request JSON.";
-    }
-    if (!validateEvent(zapRequest))
-      return "Zap request is not a valid Nostr event.";
-    if (!verifyEvent(zapRequest))
-      return "Invalid signature on zap request.";
-    let p = zapRequest.tags.find(([t, v]) => t === "p" && v);
-    if (!p)
-      return "Zap request doesn't have a 'p' tag.";
-    if (!p[1].match(/^[a-f0-9]{64}$/))
-      return "Zap request 'p' tag is not valid hex.";
-    let e = zapRequest.tags.find(([t, v]) => t === "e" && v);
-    if (e && !e[1].match(/^[a-f0-9]{64}$/))
-      return "Zap request 'e' tag is not valid hex.";
-    let relays = zapRequest.tags.find(([t, v]) => t === "relays" && v);
-    if (!relays)
-      return "Zap request doesn't have a 'relays' tag.";
-    return null;
-  }
-  function makeZapReceipt({
-    zapRequest,
-    preimage,
-    bolt11,
-    paidAt
-  }) {
-    let zr = JSON.parse(zapRequest);
-    let tagsFromZapRequest = zr.tags.filter(([t]) => t === "e" || t === "p" || t === "a");
-    let zap = {
-      kind: 9735,
-      created_at: Math.round(paidAt.getTime() / 1e3),
-      content: "",
-      tags: [...tagsFromZapRequest, ["P", zr.pubkey], ["bolt11", bolt11], ["description", zapRequest]]
-    };
-    if (preimage) {
-      zap.tags.push(["preimage", preimage]);
-    }
-    return zap;
-  }
-  function getSatoshisAmountFromBolt11(bolt11) {
-    if (bolt11.length < 50) {
-      return 0;
-    }
-    bolt11 = bolt11.substring(0, 50);
-    const idx = bolt11.lastIndexOf("1");
-    if (idx === -1) {
-      return 0;
-    }
-    const hrp = bolt11.substring(0, idx);
-    if (!hrp.startsWith("lnbc")) {
-      return 0;
-    }
-    const amount = hrp.substring(4);
-    if (amount.length < 1) {
-      return 0;
-    }
-    const char = amount[amount.length - 1];
-    const digit = char.charCodeAt(0) - "0".charCodeAt(0);
-    const isDigit = digit >= 0 && digit <= 9;
-    let cutPoint = amount.length - 1;
-    if (isDigit) {
-      cutPoint++;
-    }
-    if (cutPoint < 1) {
-      return 0;
-    }
-    const num2 = parseInt(amount.substring(0, cutPoint));
-    switch (char) {
-      case "m":
-        return num2 * 1e5;
-      case "u":
-        return num2 * 100;
-      case "n":
-        return num2 / 10;
-      case "p":
-        return num2 / 1e4;
-      default:
-        return num2 * 1e8;
-    }
-  }
-  var nip77_exports = {};
-  __export2(nip77_exports, {
-    Negentropy: () => Negentropy,
-    NegentropyStorageVector: () => NegentropyStorageVector,
-    NegentropySync: () => NegentropySync
-  });
-  var PROTOCOL_VERSION = 97;
-  var ID_SIZE = 32;
-  var FINGERPRINT_SIZE = 16;
-  var Mode = {
-    Skip: 0,
-    Fingerprint: 1,
-    IdList: 2
-  };
-  var WrappedBuffer = class {
-    constructor(buffer) {
-      __publicField(this, "_raw");
-      __publicField(this, "length");
-      if (typeof buffer === "number") {
-        this._raw = new Uint8Array(buffer);
-        this.length = 0;
-      } else if (buffer instanceof Uint8Array) {
-        this._raw = new Uint8Array(buffer);
-        this.length = buffer.length;
-      } else {
-        this._raw = new Uint8Array(512);
-        this.length = 0;
-      }
-    }
-    unwrap() {
-      return this._raw.subarray(0, this.length);
-    }
-    get capacity() {
-      return this._raw.byteLength;
-    }
-    extend(buf) {
-      if (buf instanceof WrappedBuffer)
-        buf = buf.unwrap();
-      if (typeof buf.length !== "number")
-        throw Error("bad length");
-      const targetSize = buf.length + this.length;
-      if (this.capacity < targetSize) {
-        const oldRaw = this._raw;
-        const newCapacity = Math.max(this.capacity * 2, targetSize);
-        this._raw = new Uint8Array(newCapacity);
-        this._raw.set(oldRaw);
-      }
-      this._raw.set(buf, this.length);
-      this.length += buf.length;
-    }
-    shift() {
-      const first = this._raw[0];
-      this._raw = this._raw.subarray(1);
-      this.length--;
-      return first;
-    }
-    shiftN(n = 1) {
-      const firstSubarray = this._raw.subarray(0, n);
-      this._raw = this._raw.subarray(n);
-      this.length -= n;
-      return firstSubarray;
-    }
-  };
-  function decodeVarInt(buf) {
-    let res = 0;
-    while (1) {
-      if (buf.length === 0)
-        throw Error("parse ends prematurely");
-      let byte = buf.shift();
-      res = res << 7 | byte & 127;
-      if ((byte & 128) === 0)
-        break;
-    }
-    return res;
-  }
-  function encodeVarInt(n) {
-    if (n === 0)
-      return new WrappedBuffer(new Uint8Array([0]));
-    let o = [];
-    while (n !== 0) {
-      o.push(n & 127);
-      n >>>= 7;
-    }
-    o.reverse();
-    for (let i2 = 0; i2 < o.length - 1; i2++)
-      o[i2] |= 128;
-    return new WrappedBuffer(new Uint8Array(o));
-  }
-  function getByte(buf) {
-    return getBytes(buf, 1)[0];
-  }
-  function getBytes(buf, n) {
-    if (buf.length < n)
-      throw Error("parse ends prematurely");
-    return buf.shiftN(n);
-  }
-  var Accumulator = class {
-    constructor() {
-      __publicField(this, "buf");
-      this.setToZero();
-    }
-    setToZero() {
-      this.buf = new Uint8Array(ID_SIZE);
-    }
-    add(otherBuf) {
-      let currCarry = 0, nextCarry = 0;
-      let p = new DataView(this.buf.buffer);
-      let po = new DataView(otherBuf.buffer);
-      for (let i2 = 0; i2 < 8; i2++) {
-        let offset = i2 * 4;
-        let orig = p.getUint32(offset, true);
-        let otherV = po.getUint32(offset, true);
-        let next = orig;
-        next += currCarry;
-        next += otherV;
-        if (next > 4294967295)
-          nextCarry = 1;
-        p.setUint32(offset, next & 4294967295, true);
-        currCarry = nextCarry;
-        nextCarry = 0;
-      }
-    }
-    negate() {
-      let p = new DataView(this.buf.buffer);
-      for (let i2 = 0; i2 < 8; i2++) {
-        let offset = i2 * 4;
-        p.setUint32(offset, ~p.getUint32(offset, true));
-      }
-      let one = new Uint8Array(ID_SIZE);
-      one[0] = 1;
-      this.add(one);
-    }
-    getFingerprint(n) {
-      let input = new WrappedBuffer();
-      input.extend(this.buf);
-      input.extend(encodeVarInt(n));
-      let hash = sha256(input.unwrap());
-      return hash.subarray(0, FINGERPRINT_SIZE);
-    }
-  };
-  var NegentropyStorageVector = class {
-    constructor() {
-      __publicField(this, "items");
-      __publicField(this, "sealed");
-      this.items = [];
-      this.sealed = false;
-    }
-    insert(timestamp, id) {
-      if (this.sealed)
-        throw Error("already sealed");
-      const idb = hexToBytes(id);
-      if (idb.byteLength !== ID_SIZE)
-        throw Error("bad id size for added item");
-      this.items.push({ timestamp, id: idb });
-    }
-    seal() {
-      if (this.sealed)
-        throw Error("already sealed");
-      this.sealed = true;
-      this.items.sort(itemCompare);
-      for (let i2 = 1; i2 < this.items.length; i2++) {
-        if (itemCompare(this.items[i2 - 1], this.items[i2]) === 0)
-          throw Error("duplicate item inserted");
-      }
-    }
-    unseal() {
-      this.sealed = false;
-    }
-    size() {
-      this._checkSealed();
-      return this.items.length;
-    }
-    getItem(i2) {
-      this._checkSealed();
-      if (i2 >= this.items.length)
-        throw Error("out of range");
-      return this.items[i2];
-    }
-    iterate(begin, end, cb) {
-      this._checkSealed();
-      this._checkBounds(begin, end);
-      for (let i2 = begin; i2 < end; ++i2) {
-        if (!cb(this.items[i2], i2))
-          break;
-      }
-    }
-    findLowerBound(begin, end, bound) {
-      this._checkSealed();
-      this._checkBounds(begin, end);
-      return this._binarySearch(this.items, begin, end, (a) => itemCompare(a, bound) < 0);
-    }
-    fingerprint(begin, end) {
-      let out = new Accumulator();
-      out.setToZero();
-      this.iterate(begin, end, (item) => {
-        out.add(item.id);
-        return true;
-      });
-      return out.getFingerprint(end - begin);
-    }
-    _checkSealed() {
-      if (!this.sealed)
-        throw Error("not sealed");
-    }
-    _checkBounds(begin, end) {
-      if (begin > end || end > this.items.length)
-        throw Error("bad range");
-    }
-    _binarySearch(arr, first, last, cmp) {
-      let count = last - first;
-      while (count > 0) {
-        let it = first;
-        let step = Math.floor(count / 2);
-        it += step;
-        if (cmp(arr[it])) {
-          first = ++it;
-          count -= step + 1;
-        } else {
-          count = step;
-        }
-      }
-      return first;
-    }
-  };
-  var Negentropy = class {
-    constructor(storage, frameSizeLimit = 6e4) {
-      __publicField(this, "storage");
-      __publicField(this, "frameSizeLimit");
-      __publicField(this, "lastTimestampIn");
-      __publicField(this, "lastTimestampOut");
-      if (frameSizeLimit < 4096)
-        throw Error("frameSizeLimit too small");
-      this.storage = storage;
-      this.frameSizeLimit = frameSizeLimit;
-      this.lastTimestampIn = 0;
-      this.lastTimestampOut = 0;
-    }
-    _bound(timestamp, id) {
-      return { timestamp, id: id || new Uint8Array(0) };
-    }
-    initiate() {
-      let output = new WrappedBuffer();
-      output.extend(new Uint8Array([PROTOCOL_VERSION]));
-      this.splitRange(0, this.storage.size(), this._bound(Number.MAX_VALUE), output);
-      return bytesToHex(output.unwrap());
-    }
-    reconcile(queryMsg, onhave, onneed) {
-      const query = new WrappedBuffer(hexToBytes(queryMsg));
-      this.lastTimestampIn = this.lastTimestampOut = 0;
-      let fullOutput = new WrappedBuffer();
-      fullOutput.extend(new Uint8Array([PROTOCOL_VERSION]));
-      let protocolVersion = getByte(query);
-      if (protocolVersion < 96 || protocolVersion > 111)
-        throw Error("invalid negentropy protocol version byte");
-      if (protocolVersion !== PROTOCOL_VERSION) {
-        throw Error("unsupported negentropy protocol version requested: " + (protocolVersion - 96));
-      }
-      let storageSize = this.storage.size();
-      let prevBound = this._bound(0);
-      let prevIndex = 0;
-      let skip = false;
-      while (query.length !== 0) {
-        let o = new WrappedBuffer();
-        let doSkip = () => {
-          if (skip) {
-            skip = false;
-            o.extend(this.encodeBound(prevBound));
-            o.extend(encodeVarInt(Mode.Skip));
-          }
-        };
-        let currBound = this.decodeBound(query);
-        let mode = decodeVarInt(query);
-        let lower = prevIndex;
-        let upper = this.storage.findLowerBound(prevIndex, storageSize, currBound);
-        if (mode === Mode.Skip) {
-          skip = true;
-        } else if (mode === Mode.Fingerprint) {
-          let theirFingerprint = getBytes(query, FINGERPRINT_SIZE);
-          let ourFingerprint = this.storage.fingerprint(lower, upper);
-          if (compareUint8Array(theirFingerprint, ourFingerprint) !== 0) {
-            doSkip();
-            this.splitRange(lower, upper, currBound, o);
-          } else {
-            skip = true;
-          }
-        } else if (mode === Mode.IdList) {
-          let numIds = decodeVarInt(query);
-          let theirElems = {};
-          for (let i2 = 0; i2 < numIds; i2++) {
-            let e = getBytes(query, ID_SIZE);
-            theirElems[bytesToHex(e)] = e;
-          }
-          skip = true;
-          this.storage.iterate(lower, upper, (item) => {
-            let k = item.id;
-            const id = bytesToHex(k);
-            if (!theirElems[id]) {
-              onhave?.(id);
-            } else {
-              delete theirElems[bytesToHex(k)];
-            }
-            return true;
-          });
-          if (onneed) {
-            for (let v of Object.values(theirElems)) {
-              onneed(bytesToHex(v));
-            }
-          }
-        } else {
-          throw Error("unexpected mode");
-        }
-        if (this.exceededFrameSizeLimit(fullOutput.length + o.length)) {
-          let remainingFingerprint = this.storage.fingerprint(upper, storageSize);
-          fullOutput.extend(this.encodeBound(this._bound(Number.MAX_VALUE)));
-          fullOutput.extend(encodeVarInt(Mode.Fingerprint));
-          fullOutput.extend(remainingFingerprint);
-          break;
-        } else {
-          fullOutput.extend(o);
-        }
-        prevIndex = upper;
-        prevBound = currBound;
-      }
-      return fullOutput.length === 1 ? null : bytesToHex(fullOutput.unwrap());
-    }
-    splitRange(lower, upper, upperBound, o) {
-      let numElems = upper - lower;
-      let buckets = 16;
-      if (numElems < buckets * 2) {
-        o.extend(this.encodeBound(upperBound));
-        o.extend(encodeVarInt(Mode.IdList));
-        o.extend(encodeVarInt(numElems));
-        this.storage.iterate(lower, upper, (item) => {
-          o.extend(item.id);
-          return true;
-        });
-      } else {
-        let itemsPerBucket = Math.floor(numElems / buckets);
-        let bucketsWithExtra = numElems % buckets;
-        let curr = lower;
-        for (let i2 = 0; i2 < buckets; i2++) {
-          let bucketSize = itemsPerBucket + (i2 < bucketsWithExtra ? 1 : 0);
-          let ourFingerprint = this.storage.fingerprint(curr, curr + bucketSize);
-          curr += bucketSize;
-          let nextBound;
-          if (curr === upper) {
-            nextBound = upperBound;
-          } else {
-            let prevItem;
-            let currItem;
-            this.storage.iterate(curr - 1, curr + 1, (item, index) => {
-              if (index === curr - 1)
-                prevItem = item;
-              else
-                currItem = item;
-              return true;
-            });
-            nextBound = this.getMinimalBound(prevItem, currItem);
-          }
-          o.extend(this.encodeBound(nextBound));
-          o.extend(encodeVarInt(Mode.Fingerprint));
-          o.extend(ourFingerprint);
-        }
-      }
-    }
-    exceededFrameSizeLimit(n) {
-      return n > this.frameSizeLimit - 200;
-    }
-    decodeTimestampIn(encoded) {
-      let timestamp = decodeVarInt(encoded);
-      timestamp = timestamp === 0 ? Number.MAX_VALUE : timestamp - 1;
-      if (this.lastTimestampIn === Number.MAX_VALUE || timestamp === Number.MAX_VALUE) {
-        this.lastTimestampIn = Number.MAX_VALUE;
-        return Number.MAX_VALUE;
-      }
-      timestamp += this.lastTimestampIn;
-      this.lastTimestampIn = timestamp;
-      return timestamp;
-    }
-    decodeBound(encoded) {
-      let timestamp = this.decodeTimestampIn(encoded);
-      let len = decodeVarInt(encoded);
-      if (len > ID_SIZE)
-        throw Error("bound key too long");
-      let id = getBytes(encoded, len);
-      return { timestamp, id };
-    }
-    encodeTimestampOut(timestamp) {
-      if (timestamp === Number.MAX_VALUE) {
-        this.lastTimestampOut = Number.MAX_VALUE;
-        return encodeVarInt(0);
-      }
-      let temp = timestamp;
-      timestamp -= this.lastTimestampOut;
-      this.lastTimestampOut = temp;
-      return encodeVarInt(timestamp + 1);
-    }
-    encodeBound(key) {
-      let output = new WrappedBuffer();
-      output.extend(this.encodeTimestampOut(key.timestamp));
-      output.extend(encodeVarInt(key.id.length));
-      output.extend(key.id);
-      return output;
-    }
-    getMinimalBound(prev, curr) {
-      if (curr.timestamp !== prev.timestamp) {
-        return this._bound(curr.timestamp);
-      } else {
-        let sharedPrefixBytes = 0;
-        let currKey = curr.id;
-        let prevKey = prev.id;
-        for (let i2 = 0; i2 < ID_SIZE; i2++) {
-          if (currKey[i2] !== prevKey[i2])
-            break;
-          sharedPrefixBytes++;
-        }
-        return this._bound(curr.timestamp, curr.id.subarray(0, sharedPrefixBytes + 1));
-      }
-    }
-  };
-  function compareUint8Array(a, b) {
-    for (let i2 = 0; i2 < a.byteLength; i2++) {
-      if (a[i2] < b[i2])
-        return -1;
-      if (a[i2] > b[i2])
-        return 1;
-    }
-    if (a.byteLength > b.byteLength)
-      return 1;
-    if (a.byteLength < b.byteLength)
-      return -1;
-    return 0;
-  }
-  function itemCompare(a, b) {
-    if (a.timestamp === b.timestamp) {
-      return compareUint8Array(a.id, b.id);
-    }
-    return a.timestamp - b.timestamp;
-  }
-  var NegentropySync = class {
-    constructor(relay, storage, filter, params = {}) {
-      __publicField(this, "relay");
-      __publicField(this, "storage");
-      __publicField(this, "neg");
-      __publicField(this, "filter");
-      __publicField(this, "subscription");
-      __publicField(this, "onhave");
-      __publicField(this, "onneed");
-      this.relay = relay;
-      this.storage = storage;
-      this.neg = new Negentropy(storage);
-      this.onhave = params.onhave;
-      this.onneed = params.onneed;
-      this.filter = filter;
-      this.subscription = this.relay.prepareSubscription([{}], { label: params.label || "negentropy" });
-      this.subscription.oncustom = (data) => {
-        switch (data[0]) {
-          case "NEG-MSG": {
-            if (data.length < 3) {
-              console.warn(`got invalid NEG-MSG from ${this.relay.url}: ${data}`);
-            }
-            try {
-              const response = this.neg.reconcile(data[2], this.onhave, this.onneed);
-              if (response) {
-                this.relay.send(`["NEG-MSG", "${this.subscription.id}", "${response}"]`);
-              } else {
-                this.close();
-                params.onclose?.();
-              }
-            } catch (error) {
-              console.error("negentropy reconcile error:", error);
-              params?.onclose?.(`reconcile error: ${error}`);
-            }
-            break;
-          }
-          case "NEG-CLOSE": {
-            const reason = data[2];
-            console.warn("negentropy error:", reason);
-            params.onclose?.(reason);
-            break;
-          }
-          case "NEG-ERR": {
-            params.onclose?.();
-          }
-        }
-      };
-    }
-    async start() {
-      const initMsg = this.neg.initiate();
-      this.relay.send(`["NEG-OPEN","${this.subscription.id}",${JSON.stringify(this.filter)},"${initMsg}"]`);
-    }
-    close() {
-      this.relay.send(`["NEG-CLOSE","${this.subscription.id}"]`);
-      this.subscription.close();
-    }
-  };
-  var nip98_exports = {};
-  __export2(nip98_exports, {
-    getToken: () => getToken,
-    hashPayload: () => hashPayload,
-    unpackEventFromToken: () => unpackEventFromToken,
-    validateEvent: () => validateEvent2,
-    validateEventKind: () => validateEventKind,
-    validateEventMethodTag: () => validateEventMethodTag,
-    validateEventPayloadTag: () => validateEventPayloadTag,
-    validateEventTimestamp: () => validateEventTimestamp,
-    validateEventUrlTag: () => validateEventUrlTag,
-    validateToken: () => validateToken
-  });
-  var _authorizationScheme = "Nostr ";
-  async function getToken(loginUrl, httpMethod, sign, includeAuthorizationScheme = false, payload) {
-    const event = {
-      kind: HTTPAuth,
-      tags: [
-        ["u", loginUrl],
-        ["method", httpMethod]
-      ],
-      created_at: Math.round((/* @__PURE__ */ new Date()).getTime() / 1e3),
-      content: ""
-    };
-    if (payload) {
-      event.tags.push(["payload", hashPayload(payload)]);
-    }
-    const signedEvent = await sign(event);
-    const authorizationScheme = includeAuthorizationScheme ? _authorizationScheme : "";
-    return authorizationScheme + base64.encode(utf8Encoder.encode(JSON.stringify(signedEvent)));
-  }
-  async function validateToken(token, url, method) {
-    const event = await unpackEventFromToken(token).catch((error) => {
-      throw error;
-    });
-    const valid = await validateEvent2(event, url, method).catch((error) => {
-      throw error;
-    });
-    return valid;
-  }
-  async function unpackEventFromToken(token) {
-    if (!token) {
-      throw new Error("Missing token");
-    }
-    token = token.replace(_authorizationScheme, "");
-    const eventB64 = utf8Decoder.decode(base64.decode(token));
-    if (!eventB64 || eventB64.length === 0 || !eventB64.startsWith("{")) {
-      throw new Error("Invalid token");
-    }
-    const event = JSON.parse(eventB64);
-    return event;
-  }
-  function validateEventTimestamp(event) {
-    if (!event.created_at) {
-      return false;
-    }
-    return Math.round((/* @__PURE__ */ new Date()).getTime() / 1e3) - event.created_at < 60;
-  }
-  function validateEventKind(event) {
-    return event.kind === HTTPAuth;
-  }
-  function validateEventUrlTag(event, url) {
-    const urlTag = event.tags.find((t) => t[0] === "u");
-    if (!urlTag) {
-      return false;
-    }
-    return urlTag.length > 0 && urlTag[1] === url;
-  }
-  function validateEventMethodTag(event, method) {
-    const methodTag = event.tags.find((t) => t[0] === "method");
-    if (!methodTag) {
-      return false;
-    }
-    return methodTag.length > 0 && methodTag[1].toLowerCase() === method.toLowerCase();
-  }
-  function hashPayload(payload) {
-    const hash = sha256(utf8Encoder.encode(JSON.stringify(payload)));
-    return bytesToHex(hash);
-  }
-  function validateEventPayloadTag(event, payload) {
-    const payloadTag = event.tags.find((t) => t[0] === "payload");
-    if (!payloadTag) {
-      return false;
-    }
-    const payloadHash = hashPayload(payload);
-    return payloadTag.length > 0 && payloadTag[1] === payloadHash;
-  }
-  async function validateEvent2(event, url, method, body) {
-    if (!verifyEvent(event)) {
-      throw new Error("Invalid nostr event, signature invalid");
-    }
-    if (!validateEventKind(event)) {
-      throw new Error("Invalid nostr event, kind invalid");
-    }
-    if (!validateEventTimestamp(event)) {
-      throw new Error("Invalid nostr event, created_at timestamp invalid");
-    }
-    if (!validateEventUrlTag(event, url)) {
-      throw new Error("Invalid nostr event, url tag invalid");
-    }
-    if (!validateEventMethodTag(event, method)) {
-      throw new Error("Invalid nostr event, method tag invalid");
-    }
-    if (Boolean(body) && typeof body === "object" && Object.keys(body).length > 0) {
-      if (!validateEventPayloadTag(event, body)) {
-        throw new Error("Invalid nostr event, payload tag does not match request body hash");
-      }
-    }
-    return true;
-  }
 
-  // src/crypto/signer.ts
-  var Signer = class _Signer {
-    constructor(secretKey) {
+  // src/crypto/signer/signer.live.ts
+  var LiveSigner = class _LiveSigner {
+    constructor(secretKey, pubkeyHex) {
       this.secretKey = secretKey;
-      this.pubkeyHex = getPublicKey(secretKey);
+      this.pubkeyHex = pubkeyHex;
     }
-    /**
-     * Generate a fresh random Nostr identity.
-     */
+    /** Generates a fresh random identity. No persistence, no restore path. */
     static generate() {
       const secretKey = generateSecretKey();
-      return new _Signer(secretKey);
+      return new _LiveSigner(secretKey, getPublicKey(secretKey));
     }
-    /**
-     * Restore from secret key hex.
-     */
-    static fromSecretKeyHex(secretKeyHex) {
-      const secretKey = hexToBytes(secretKeyHex);
-      if (secretKey.length !== 32) {
-        throw new Error("Secret key must be 32 bytes");
-      }
-      return new _Signer(secretKey);
+    /** Builds an identity from an existing 32-byte secret key. */
+    static fromSecretKey(secretKey) {
+      return new _LiveSigner(secretKey, getPublicKey(secretKey));
     }
-    /**
-     * Export secret key as hex (for persistence if needed).
-     * Use with caution — this is the root credential.
-     */
-    exportSecretKeyHex() {
-      return bytesToHex(this.secretKey);
+    sign(kind, tags, content, createdAt = Math.floor(Date.now() / 1e3)) {
+      const unsigned = {
+        pubkey: this.pubkeyHex,
+        created_at: createdAt,
+        kind,
+        tags,
+        content
+      };
+      return finalizeEvent(unsigned, this.secretKey);
     }
-    /**
-     * Sign a Nostr event, returning the finalized event with id and sig.
-     */
-    sign(event) {
-      return finalizeEvent(event, this.secretKey);
-    }
-    /**
-     * Verify a Nostr event's signature.
-     */
     verify(event) {
       return verifyEvent(event);
     }
-    /**
-     * ECDH: shared secret between this key and another public key.
-     * Used for establishing encryption keys.
-     */
-    ecdh(theirPubkeyHex) {
-      return nip44_exports.v2.utils.getConversationKey(this.secretKey, theirPubkeyHex);
+    getConvoKey(theirPubkeyHex) {
+      assertPubkeyHex(theirPubkeyHex);
+      return v2.utils.getConversationKey(this.secretKey, theirPubkeyHex);
     }
-    /**
-     * NIP-44 v2 encrypt: encrypt plaintext to a recipient.
-     */
-    encryptNip44(theirPubkeyHex, plaintext) {
-      return nip44_exports.v2.encrypt(plaintext, this.ecdh(theirPubkeyHex));
+    encryptNip44(plaintext, convoKey) {
+      return v2.encrypt(plaintext, convoKey);
     }
-    /**
-     * NIP-44 v2 decrypt: decrypt ciphertext from a sender.
-     */
-    decryptNip44(theirPubkeyHex, ciphertext) {
-      return nip44_exports.v2.decrypt(ciphertext, this.ecdh(theirPubkeyHex));
+    decryptNip44(payload, convoKey) {
+      return v2.decrypt(payload, convoKey);
     }
-    /**
-     * Hash data using SHA-256.
-     */
-    static sha256(data) {
-      return sha256(data);
+  };
+  var HEX_64_RE = /^[0-9a-f]{64}$/i;
+  function assertPubkeyHex(pubkeyHex) {
+    if (!HEX_64_RE.test(pubkeyHex)) {
+      throw new Error(`invalid pubkey hex: expected 64 hex chars, got ${JSON.stringify(pubkeyHex)}`);
     }
-    /**
-     * Hash hex string to hex.
-     */
-    static sha256Hex(hex) {
-      return bytesToHex(sha256(hexToBytes(hex)));
+  }
+
+  // src/crypto/signer/signer.mock.ts
+  var MockSigner = class _MockSigner {
+    constructor(live) {
+      this.live = live;
+    }
+    /** Deterministic identity derived from `seed` (sha256(seed) as the secret key). */
+    static fromSeed(seed) {
+      const secretKey = sha256(new TextEncoder().encode(seed));
+      return new _MockSigner(LiveSigner.fromSecretKey(secretKey));
+    }
+    get pubkeyHex() {
+      return this.live.pubkeyHex;
+    }
+    sign(kind, tags, content, createdAt) {
+      return this.live.sign(kind, tags, content, createdAt);
+    }
+    verify(event) {
+      return this.live.verify(event);
+    }
+    getConvoKey(theirPubkeyHex) {
+      return this.live.getConvoKey(theirPubkeyHex);
+    }
+    encryptNip44(plaintext, convoKey) {
+      return this.live.encryptNip44(plaintext, convoKey);
+    }
+    decryptNip44(payload, convoKey) {
+      return this.live.decryptNip44(payload, convoKey);
+    }
+  };
+  function pubkeyForSeed(seed) {
+    const secretKey = sha256(new TextEncoder().encode(seed));
+    return getPublicKey(secretKey);
+  }
+
+  // src/nostr/event-sink/event-sink.live.ts
+  var DEFAULT_RETENTION_WINDOW_MS = 5 * 60 * 1e3;
+  var DEFAULT_MAX_ENTRIES = 1e4;
+  var LiveDedupingEventSink = class {
+    constructor(options = {}) {
+      this.seenAt = /* @__PURE__ */ new Map();
+      this.retentionWindowMs = options.retentionWindowMs ?? DEFAULT_RETENTION_WINDOW_MS;
+      this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+      this.now = options.now ?? Date.now;
+    }
+    offer(event) {
+      const now = this.now();
+      this.evictExpired(now);
+      if (this.seenAt.has(event.id)) {
+        return false;
+      }
+      this.seenAt.set(event.id, now);
+      this.evictOverCapacity();
+      return true;
+    }
+    /** Number of event ids currently tracked. Exposed for tests/inspection. */
+    get size() {
+      return this.seenAt.size;
+    }
+    evictExpired(now) {
+      const cutoff = now - this.retentionWindowMs;
+      for (const [id, seenAt] of this.seenAt) {
+        if (seenAt <= cutoff) {
+          this.seenAt.delete(id);
+        } else {
+          break;
+        }
+      }
+    }
+    evictOverCapacity() {
+      while (this.seenAt.size > this.maxEntries) {
+        const oldestId = this.seenAt.keys().next().value;
+        if (oldestId === void 0) break;
+        this.seenAt.delete(oldestId);
+      }
     }
   };
 
-  // src/core/emitter.ts
-  function createStateFlow(initialValue) {
-    let value = initialValue;
-    const listeners = /* @__PURE__ */ new Set();
-    return {
-      get value() {
-        return value;
-      },
-      emit(newValue) {
-        value = newValue;
-        listeners.forEach((listener) => listener(newValue));
-      },
-      subscribe(listener) {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-      asReadOnly() {
-        return {
-          get value() {
-            return value;
-          },
-          subscribe: (listener) => this.subscribe(listener),
-          asReadOnly() {
-            return this;
+  // src/nostr/event-sink/event-sink.mock.ts
+  var MockEventSink = class {
+    constructor() {
+      /** Every event passed to `offer()`, in call order (including duplicates). */
+      this.offered = [];
+      this.seenIds = /* @__PURE__ */ new Set();
+    }
+    offer(event) {
+      this.offered.push(event);
+      if (this.seenIds.has(event.id)) return false;
+      this.seenIds.add(event.id);
+      return true;
+    }
+    /** Test helper: forget an id, so the next offer() of it is accepted again. */
+    forget(eventId) {
+      this.seenIds.delete(eventId);
+    }
+  };
+
+  // src/nostr/relay-socket/relay-socket.interface.ts
+  var RelaySocketState = /* @__PURE__ */ ((RelaySocketState2) => {
+    RelaySocketState2["Connecting"] = "Connecting";
+    RelaySocketState2["Open"] = "Open";
+    RelaySocketState2["Reconnecting"] = "Reconnecting";
+    RelaySocketState2["Closed"] = "Closed";
+    return RelaySocketState2;
+  })(RelaySocketState || {});
+
+  // src/nostr/relay-socket/relay-socket.live.ts
+  function exponentialBackoff(attempt, options) {
+    const base = options?.baseMs ?? 500;
+    const max = options?.maxMs ?? 3e4;
+    return Math.min(max, base * 2 ** attempt);
+  }
+  var OPEN_READY_STATE = 1;
+  var LiveRelaySocket = class {
+    constructor(url, options = {}) {
+      this.url = url;
+      this.stateFlow = createStateFlow("Connecting" /* Connecting */);
+      this.messagesFlow = createSharedFlow();
+      this.ws = null;
+      this.attempt = 0;
+      this.reconnectTimer = null;
+      this.closedByCaller = false;
+      this.backoffStrategy = options.backoffStrategy ?? exponentialBackoff;
+      this.webSocketFactory = options.webSocketFactory ?? ((u) => new WebSocket(u));
+      this.openSocket();
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get messages() {
+      return this.messagesFlow.asReadOnly();
+    }
+    send(data) {
+      if (this.stateFlow.value !== "Open" /* Open */ || !this.ws) {
+        return err(new Error(`relay ${this.url}: not open`));
+      }
+      if (this.ws.readyState !== OPEN_READY_STATE) {
+        return err(new Error(`relay ${this.url}: socket not ready`));
+      }
+      this.ws.send(data);
+      return ok(void 0);
+    }
+    close() {
+      if (this.closedByCaller) return;
+      this.closedByCaller = true;
+      if (this.reconnectTimer !== null) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.stateFlow.value = "Closed" /* Closed */;
+      this.ws?.close(1e3, "client closing");
+      this.ws = null;
+    }
+    openSocket() {
+      if (this.closedByCaller) return;
+      this.stateFlow.value = this.attempt === 0 ? "Connecting" /* Connecting */ : "Reconnecting" /* Reconnecting */;
+      const socket = this.webSocketFactory(this.url);
+      this.ws = socket;
+      socket.onopen = () => {
+        if (this.ws !== socket) return;
+        this.attempt = 0;
+        this.stateFlow.value = "Open" /* Open */;
+      };
+      socket.onmessage = (ev) => {
+        if (this.ws !== socket) return;
+        this.messagesFlow.emit(ev.data);
+      };
+      socket.onerror = () => {
+      };
+      socket.onclose = () => {
+        if (this.ws !== socket) return;
+        this.ws = null;
+        if (this.closedByCaller) return;
+        this.scheduleReconnect();
+      };
+    }
+    scheduleReconnect() {
+      const delay = this.backoffStrategy(this.attempt);
+      this.attempt += 1;
+      this.stateFlow.value = "Reconnecting" /* Reconnecting */;
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.openSocket();
+      }, delay);
+    }
+  };
+
+  // src/nostr/relay-socket/relay-socket.mock.ts
+  var MockRelaySocket = class {
+    constructor(url = "wss://relay.example") {
+      this.url = url;
+      this.stateFlow = createStateFlow("Connecting" /* Connecting */);
+      this.messagesFlow = createSharedFlow();
+      /** Every frame handed to `send()`, in order. */
+      this.sent = [];
+      this.closed = false;
+      this.sendResult = ok(void 0);
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get messages() {
+      return this.messagesFlow.asReadOnly();
+    }
+    send(data) {
+      this.sent.push(data);
+      return this.sendResult;
+    }
+    close() {
+      this.closed = true;
+      this.stateFlow.value = "Closed" /* Closed */;
+    }
+    // --- test-only driver methods ---
+    open() {
+      this.stateFlow.value = "Open" /* Open */;
+    }
+    reconnecting() {
+      this.stateFlow.value = "Reconnecting" /* Reconnecting */;
+    }
+    /** Configures every subsequent `send()` to report failure. */
+    failSends(error = new Error("mock relay rejected send")) {
+      this.sendResult = { ok: false, error };
+    }
+    /** Simulates an inbound raw text frame from the relay. */
+    deliver(raw) {
+      this.messagesFlow.emit(raw);
+    }
+  };
+
+  // src/nostr/relay-session/relay-session.live.ts
+  var SUBSCRIPTION_ID = "mesh";
+  var LiveRelaySession = class {
+    constructor(socket, myPubkeyHex, kinds) {
+      this.socket = socket;
+      this.myPubkeyHex = myPubkeyHex;
+      this.kinds = kinds;
+      this.eventsFlow = createSharedFlow();
+      this.unsubscribeSocketState = this.socket.state.subscribe((state) => {
+        if (state === "Open" /* Open */) {
+          this.sendSubscription();
+        }
+      });
+      this.unsubscribeSocketMessages = this.socket.messages.subscribe((raw) => {
+        this.handleMessage(raw);
+      });
+    }
+    get url() {
+      return this.socket.url;
+    }
+    get connectionState() {
+      return this.socket.state;
+    }
+    get events() {
+      return this.eventsFlow.asReadOnly();
+    }
+    publish(event) {
+      return this.socket.send(JSON.stringify(["EVENT", event]));
+    }
+    close() {
+      this.unsubscribeSocketState();
+      this.unsubscribeSocketMessages();
+      this.socket.close();
+    }
+    sendSubscription() {
+      const filter = { "#p": [this.myPubkeyHex] };
+      if (this.kinds) filter.kinds = this.kinds;
+      this.socket.send(JSON.stringify(["REQ", SUBSCRIPTION_ID, filter]));
+    }
+    handleMessage(raw) {
+      const parsed = parseRelayMessage(raw);
+      if (!parsed.ok) return;
+      const [type, ...rest] = parsed.value;
+      if (type === "EVENT" && rest[0] === SUBSCRIPTION_ID) {
+        const event = rest[1];
+        this.eventsFlow.emit(event);
+      }
+    }
+  };
+  function parseRelayMessage(raw) {
+    try {
+      const value = JSON.parse(raw);
+      if (!Array.isArray(value) || value.length === 0 || typeof value[0] !== "string") {
+        return err(new Error("malformed relay frame: not a [type, ...] array"));
+      }
+      return ok(value);
+    } catch (e) {
+      return err(e instanceof Error ? e : new Error(String(e)));
+    }
+  }
+
+  // src/nostr/relay-session/relay-session.mock.ts
+  var MockRelaySession = class {
+    constructor(url = "wss://relay.example") {
+      this.url = url;
+      this.stateFlow = createStateFlow("Open" /* Open */);
+      this.eventsFlow = createSharedFlow();
+      /** Every event handed to `publish()`, in order. */
+      this.published = [];
+      this.publishResult = ok(void 0);
+    }
+    get connectionState() {
+      return this.stateFlow.asReadOnly();
+    }
+    get events() {
+      return this.eventsFlow.asReadOnly();
+    }
+    publish(event) {
+      this.published.push(event);
+      return this.publishResult;
+    }
+    close() {
+      this.stateFlow.value = "Closed" /* Closed */;
+    }
+    // --- test-only driver methods ---
+    /** Configures every subsequent `publish()` to report failure. */
+    failPublishes(error = new Error("mock relay rejected publish")) {
+      this.publishResult = { ok: false, error };
+    }
+    /** Simulates an inbound event delivered by this relay. */
+    deliver(event) {
+      this.eventsFlow.emit(event);
+    }
+  };
+
+  // src/nostr/signalling-client/signalling-client.interface.ts
+  var SIGNALLING_KIND = 25050;
+
+  // src/nostr/signalling-client/signalling-client.live.ts
+  var LiveNostrSignallingClient = class {
+    constructor(signer, relayUrls, options = {}) {
+      this.signer = signer;
+      this.inboundFlow = createSharedFlow();
+      this.unsubscribes = [];
+      this.sink = options.eventSink ?? new LiveDedupingEventSink();
+      const createSession = options.createRelaySession ?? ((url, myPubkeyHex) => {
+        const socket = new LiveRelaySocket(url, options.relaySocketOptions);
+        return new LiveRelaySession(socket, myPubkeyHex, [SIGNALLING_KIND]);
+      });
+      this.sessions = relayUrls.map((url) => createSession(url, this.signer.pubkeyHex));
+      for (const session of this.sessions) {
+        const unsubscribe = session.events.subscribe((event) => this.handleInboundEvent(event));
+        this.unsubscribes.push(unsubscribe);
+      }
+    }
+    get myPubkeyHex() {
+      return this.signer.pubkeyHex;
+    }
+    get inbound() {
+      return this.inboundFlow.asReadOnly();
+    }
+    send(toPubkeyHex, payload) {
+      const convoKey = this.signer.getConvoKey(toPubkeyHex);
+      const ciphertext = this.signer.encryptNip44(payload, convoKey);
+      const event = this.signer.sign(SIGNALLING_KIND, [["p", toPubkeyHex]], ciphertext);
+      let anySucceeded = false;
+      let lastError = new Error("no relays configured");
+      for (const session of this.sessions) {
+        const result = session.publish(event);
+        if (result.ok) {
+          anySucceeded = true;
+        } else {
+          lastError = result.error;
+        }
+      }
+      return anySucceeded ? ok(void 0) : err(lastError);
+    }
+    close() {
+      for (const unsubscribe of this.unsubscribes) unsubscribe();
+      for (const session of this.sessions) session.close();
+    }
+    handleInboundEvent(event) {
+      if (!this.sink.offer(event)) return;
+      let convoKey;
+      try {
+        convoKey = this.signer.getConvoKey(event.pubkey);
+      } catch {
+        return;
+      }
+      let plaintext;
+      try {
+        plaintext = this.signer.decryptNip44(event.content, convoKey);
+      } catch {
+        return;
+      }
+      this.inboundFlow.emit({ fromPubkeyHex: event.pubkey, payload: plaintext });
+    }
+  };
+
+  // src/nostr/signalling-client/signalling-client.mock.ts
+  var MockSignallingClient = class {
+    constructor(myPubkeyHex) {
+      this.myPubkeyHex = myPubkeyHex;
+      this.inboundFlow = createSharedFlow();
+      /** Every `send()` call, in order. */
+      this.sent = [];
+      this.sendResult = ok(void 0);
+    }
+    get inbound() {
+      return this.inboundFlow.asReadOnly();
+    }
+    send(toPubkeyHex, payload) {
+      this.sent.push({ toPubkeyHex, payload });
+      return this.sendResult;
+    }
+    close() {
+    }
+    // --- test-only driver methods ---
+    /** Configures every subsequent `send()` to report failure. */
+    failSends(error = new Error("mock signalling client rejected send")) {
+      this.sendResult = { ok: false, error };
+    }
+    /** Simulates a decrypted inbound message arriving from `fromPubkeyHex`. */
+    deliver(fromPubkeyHex, payload) {
+      this.inboundFlow.emit({ fromPubkeyHex, payload });
+    }
+  };
+
+  // src/webrtc/peer-connection/peer-connection.live.ts
+  var LiveDataChannel = class {
+    constructor(channel) {
+      this.channel = channel;
+      this.onopen = null;
+      this.onclose = null;
+      this.onmessage = null;
+      channel.binaryType = "arraybuffer";
+      channel.onopen = () => this.onopen?.();
+      channel.onclose = () => this.onclose?.();
+      channel.onmessage = (ev) => {
+        const data = ev.data instanceof ArrayBuffer ? new Uint8Array(ev.data) : new Uint8Array(0);
+        this.onmessage?.({ data });
+      };
+    }
+    get label() {
+      return this.channel.label;
+    }
+    get readyState() {
+      return this.channel.readyState;
+    }
+    send(data) {
+      this.channel.send(data);
+    }
+    close() {
+      this.channel.close();
+    }
+  };
+  var LivePeerConnection = class {
+    constructor(pc) {
+      this.pc = pc;
+      this.onconnectionstatechange = null;
+      this.ondatachannel = null;
+      this.pc.onconnectionstatechange = () => this.onconnectionstatechange?.();
+      this.pc.ondatachannel = (ev) => {
+        this.ondatachannel?.({ channel: new LiveDataChannel(ev.channel) });
+      };
+    }
+    get connectionState() {
+      return this.pc.connectionState;
+    }
+    createDataChannel(label) {
+      return new LiveDataChannel(this.pc.createDataChannel(label));
+    }
+    async createOffer() {
+      const offer = await this.pc.createOffer();
+      await this.pc.setLocalDescription(offer);
+      await this.waitForIceGatheringComplete();
+      return this.currentLocalDescription("offer");
+    }
+    async createAnswer() {
+      const answer = await this.pc.createAnswer();
+      await this.pc.setLocalDescription(answer);
+      await this.waitForIceGatheringComplete();
+      return this.currentLocalDescription("answer");
+    }
+    async setRemoteDescription(desc) {
+      await this.pc.setRemoteDescription(desc);
+    }
+    close() {
+      this.pc.close();
+    }
+    currentLocalDescription(type) {
+      const local = this.pc.localDescription;
+      if (!local) throw new Error(`localDescription missing after create${type === "offer" ? "Offer" : "Answer"}()`);
+      return { type, sdp: local.sdp };
+    }
+    waitForIceGatheringComplete() {
+      if (this.pc.iceGatheringState === "complete") return Promise.resolve();
+      return new Promise((resolve) => {
+        const check = () => {
+          if (this.pc.iceGatheringState === "complete") {
+            this.pc.removeEventListener("icegatheringstatechange", check);
+            resolve();
           }
         };
-      }
-    };
+        this.pc.addEventListener("icegatheringstatechange", check);
+      });
+    }
+  };
+  function createLivePeerConnectionFactory(options = {}) {
+    return () => new LivePeerConnection(new RTCPeerConnection({ iceServers: options.iceServers }));
   }
-  function createSharedFlow() {
-    const listeners = /* @__PURE__ */ new Set();
-    return {
-      emit(value) {
-        listeners.forEach((listener) => listener(value));
-      },
-      subscribe(listener) {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-      asReadOnly() {
-        return {
-          subscribe: (listener) => this.subscribe(listener),
-          asReadOnly() {
-            return this;
-          }
-        };
+
+  // src/webrtc/peer-connection/peer-connection.mock.ts
+  var MockDataChannel = class {
+    constructor(label) {
+      this.label = label;
+      this.readyState = "connecting";
+      this.onopen = null;
+      this.onclose = null;
+      this.onmessage = null;
+      this.peer = null;
+      this.sent = [];
+    }
+    open() {
+      this.readyState = "open";
+      this.onopen?.();
+    }
+    send(data) {
+      this.sent.push(data);
+      this.peer?.onmessage?.({ data });
+    }
+    close() {
+      this.readyState = "closed";
+      this.onclose?.();
+    }
+  };
+  var MockPeerConnection = class {
+    constructor() {
+      this.connectionState = "new";
+      this.onconnectionstatechange = null;
+      this.ondatachannel = null;
+      this.dataChannel = null;
+      this.remote = null;
+    }
+    createDataChannel(label) {
+      const channel = new MockDataChannel(label);
+      this.dataChannel = channel;
+      return channel;
+    }
+    async createOffer() {
+      return { type: "offer", sdp: "mock-offer-sdp" };
+    }
+    async createAnswer() {
+      return { type: "answer", sdp: "mock-answer-sdp" };
+    }
+    async setRemoteDescription(desc) {
+      if (desc.type === "offer") {
+        const remoteChannel = this.remote?.dataChannel;
+        if (remoteChannel) {
+          const localChannel = new MockDataChannel(remoteChannel.label);
+          localChannel.peer = remoteChannel;
+          remoteChannel.peer = localChannel;
+          this.dataChannel = localChannel;
+          this.ondatachannel?.({ channel: localChannel });
+        }
+      } else {
+        this.markConnected();
+        this.remote?.markConnected();
+        this.dataChannel?.open();
+        this.remote?.dataChannel?.open();
       }
-    };
+    }
+    close() {
+      this.connectionState = "closed";
+      this.onconnectionstatechange?.();
+    }
+    markConnected() {
+      this.connectionState = "connected";
+      this.onconnectionstatechange?.();
+    }
+    simulateFailure() {
+      this.connectionState = "failed";
+      this.onconnectionstatechange?.();
+    }
+  };
+  function createLinkedMockPeerConnections() {
+    const a = new MockPeerConnection();
+    const b = new MockPeerConnection();
+    a.remote = b;
+    b.remote = a;
+    return [a, b];
   }
+
+  // src/webrtc/peer-link/peer-link.live.ts
+  var LivePeerLink = class {
+    constructor(channel) {
+      this.channel = channel;
+      this.stateFlow = createStateFlow("open");
+      this.incomingBytesFlow = createSharedFlow();
+      this.channel.onmessage = (ev) => {
+        this.incomingBytesFlow.emit(ev.data);
+      };
+      this.channel.onclose = () => {
+        this.stateFlow.value = "closed";
+      };
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get incomingBytes() {
+      return this.incomingBytesFlow.asReadOnly();
+    }
+    send(data) {
+      if (this.stateFlow.value !== "open") {
+        throw new Error("cannot send on a closed PeerLink");
+      }
+      this.channel.send(data);
+    }
+    close() {
+      if (this.stateFlow.value === "closed") return;
+      this.stateFlow.value = "closed";
+      this.channel.close();
+    }
+  };
+
+  // src/webrtc/peer-link/peer-link.mock.ts
+  var MockPeerLink = class {
+    constructor() {
+      this.stateFlow = createStateFlow("open");
+      this.incomingBytesFlow = createSharedFlow();
+      /** Every payload handed to `send()`, in order. */
+      this.sent = [];
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get incomingBytes() {
+      return this.incomingBytesFlow.asReadOnly();
+    }
+    send(data) {
+      if (this.stateFlow.value !== "open") {
+        throw new Error("cannot send on a closed PeerLink");
+      }
+      this.sent.push(data);
+    }
+    close() {
+      this.stateFlow.value = "closed";
+    }
+    // --- test-only driver methods ---
+    /** Simulates bytes arriving from the remote peer. */
+    simulateIncoming(data) {
+      this.incomingBytesFlow.emit(data);
+    }
+  };
+
+  // src/webrtc/initiator/initiator.live.ts
+  var DEFAULT_HANDSHAKE_TIMEOUT_MS = 3e4;
+  var DATA_CHANNEL_LABEL = "mesh";
+  var LiveInitiator = class {
+    constructor(options) {
+      this.stateFlow = createStateFlow("Initiating" /* Initiating */);
+      this.timeoutHandle = null;
+      this.link = null;
+      this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
+      this.pc = options.peerConnectionFactory();
+      this.pc.onconnectionstatechange = () => this.handleConnectionStateChange();
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get peerLink() {
+      return this.link;
+    }
+    async createOffer() {
+      const channel = this.pc.createDataChannel(DATA_CHANNEL_LABEL);
+      this.wireDataChannel(channel);
+      this.stateFlow.value = "Offering" /* Offering */;
+      const offer = await this.pc.createOffer();
+      this.stateFlow.value = "Connecting" /* Connecting */;
+      this.startHandshakeTimeout();
+      return offer;
+    }
+    async acceptAnswer(answer) {
+      if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
+      await this.pc.setRemoteDescription(answer);
+    }
+    close() {
+      this.clearHandshakeTimeout();
+      this.link?.close();
+      this.pc.close();
+      this.stateFlow.value = "Closed" /* Closed */;
+    }
+    wireDataChannel(channel) {
+      channel.onopen = () => {
+        if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
+        this.link = new LivePeerLink(channel);
+        this.clearHandshakeTimeout();
+        this.stateFlow.value = "Connected" /* Connected */;
+      };
+    }
+    handleConnectionStateChange() {
+      if (this.pc.connectionState === "failed") this.fail();
+    }
+    fail() {
+      if (this.stateFlow.value === "Failed" /* Failed */ || this.stateFlow.value === "Closed" /* Closed */) return;
+      this.clearHandshakeTimeout();
+      this.stateFlow.value = "Failed" /* Failed */;
+    }
+    startHandshakeTimeout() {
+      this.timeoutHandle = setTimeout(() => {
+        this.timeoutHandle = null;
+        if (this.stateFlow.value !== "Connected" /* Connected */) this.fail();
+      }, this.handshakeTimeoutMs);
+    }
+    clearHandshakeTimeout() {
+      if (this.timeoutHandle !== null) {
+        clearTimeout(this.timeoutHandle);
+        this.timeoutHandle = null;
+      }
+    }
+  };
+
+  // src/webrtc/initiator/initiator.mock.ts
+  var MockInitiator = class {
+    constructor() {
+      this.stateFlow = createStateFlow("Initiating" /* Initiating */);
+      this.link = null;
+      /** Every offer returned by `createOffer()`, in order. */
+      this.offersCreated = [];
+      /** Every answer passed to `acceptAnswer()`, in order. */
+      this.answersAccepted = [];
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get peerLink() {
+      return this.link;
+    }
+    async createOffer() {
+      this.stateFlow.value = "Offering" /* Offering */;
+      const offer = { type: "offer", sdp: "mock-offer-sdp" };
+      this.offersCreated.push(offer);
+      this.stateFlow.value = "Connecting" /* Connecting */;
+      return offer;
+    }
+    async acceptAnswer(answer) {
+      if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
+      this.answersAccepted.push(answer);
+    }
+    close() {
+      this.link?.close();
+      this.stateFlow.value = "Closed" /* Closed */;
+    }
+    // --- test-only driver methods ---
+    /** Forces the state machine to Connected, attaching the given PeerLink. */
+    simulateConnected(link) {
+      this.link = link;
+      this.stateFlow.value = "Connected" /* Connected */;
+    }
+    /** Forces the state machine to Failed (connection failure or handshake timeout). */
+    simulateFailed() {
+      if (this.stateFlow.value === "Closed" /* Closed */) return;
+      this.stateFlow.value = "Failed" /* Failed */;
+    }
+  };
+
+  // src/webrtc/answerer/answerer.live.ts
+  var LiveAnswerer = class {
+    constructor(options) {
+      this.stateFlow = createStateFlow("Answering" /* Answering */);
+      this.link = null;
+      this.pc = options.peerConnectionFactory();
+      this.pc.onconnectionstatechange = () => this.handleConnectionStateChange();
+      this.pc.ondatachannel = (ev) => this.wireDataChannel(ev.channel);
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get peerLink() {
+      return this.link;
+    }
+    async createAnswer(offer) {
+      await this.pc.setRemoteDescription(offer);
+      const answer = await this.pc.createAnswer();
+      this.stateFlow.value = "Connecting" /* Connecting */;
+      return answer;
+    }
+    close() {
+      this.link?.close();
+      this.pc.close();
+      this.stateFlow.value = "Closed" /* Closed */;
+    }
+    wireDataChannel(channel) {
+      channel.onopen = () => {
+        if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
+        this.link = new LivePeerLink(channel);
+        this.stateFlow.value = "Connected" /* Connected */;
+      };
+    }
+    handleConnectionStateChange() {
+      if (this.pc.connectionState !== "failed") return;
+      if (this.stateFlow.value === "Failed" /* Failed */ || this.stateFlow.value === "Closed" /* Closed */) return;
+      this.stateFlow.value = "Failed" /* Failed */;
+    }
+  };
+
+  // src/webrtc/answerer/answerer.mock.ts
+  var MockAnswerer = class {
+    constructor() {
+      this.stateFlow = createStateFlow("Answering" /* Answering */);
+      this.link = null;
+      /** Every offer passed to `createAnswer()`, in order. */
+      this.offersReceived = [];
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get peerLink() {
+      return this.link;
+    }
+    async createAnswer(offer) {
+      this.offersReceived.push(offer);
+      this.stateFlow.value = "Connecting" /* Connecting */;
+      return { type: "answer", sdp: "mock-answer-sdp" };
+    }
+    close() {
+      this.link?.close();
+      this.stateFlow.value = "Closed" /* Closed */;
+    }
+    // --- test-only driver methods ---
+    /** Forces the state machine to Connected, attaching the given PeerLink. */
+    simulateConnected(link) {
+      this.link = link;
+      this.stateFlow.value = "Connected" /* Connected */;
+    }
+    /** Forces the state machine to Failed. */
+    simulateFailed() {
+      if (this.stateFlow.value === "Closed" /* Closed */) return;
+      this.stateFlow.value = "Failed" /* Failed */;
+    }
+  };
   return __toCommonJS(index_exports);
 })();
 /*! Bundled license information:
@@ -6628,10 +4527,9 @@ var CoralieCore = (() => {
 @noble/curves/secp256k1.js:
   (*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
 
-@scure/base/index.js:
-  (*! scure-base - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
-
 @noble/ciphers/utils.js:
   (*! noble-ciphers - MIT License (c) 2023 Paul Miller (paulmillr.com) *)
+
+@scure/base/index.js:
+  (*! scure-base - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
 */
-//# sourceMappingURL=index.global.js.map

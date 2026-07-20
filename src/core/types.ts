@@ -1,23 +1,10 @@
 /**
- * Core types for Nostr + WebRTC mesh.
- * 
- * Phase 0 types:
- * - LinkState: enum of connection states
- * - SessionDescriptionData: WebRTC SDP wrapper
- * - DataChannelFrame: message frame format
- * - PeerMessage: application-level message
- * - TerminalFailure: failure with pubkey and attempt count
- * - NostrEvent: signed Nostr event
- * - UnsignedNostrEvent: pre-signature event
- */
-
-/**
- * State of a peer link connection.
- * 
+ * Connection lifecycle state for a single peer link.
+ *
  * Initiator side flow:
  *   Initiating → Offering → Connecting → Connected
  *                         ↘ Failed ↗
- * 
+ *
  * Answerer side flow:
  *   Answering → Answering → Connecting → Connected
  *                         ↘ Failed ↗
@@ -42,7 +29,7 @@ export interface SessionDescriptionData {
 
 /**
  * Frame format for data channel communication.
- * 
+ *
  * Frames are JSON serialized across the WebRTC data channel.
  * Type discriminator determines the payload shape.
  */
@@ -58,7 +45,7 @@ export type DataChannelFrame =
  */
 export interface PeerMessage {
   from: string // sender's pubkey hex
-  to: string   // recipient's pubkey hex
+  to: string // recipient's pubkey hex
   timestamp: number
   payload: unknown
 }
@@ -94,4 +81,19 @@ export interface UnsignedNostrEvent {
   kind: number
   tags: string[][]
   content: string
+}
+
+/**
+ * Lightweight `Result` type, mirroring the Kotlin reference's use of
+ * `Result<T>` for fallible operations (e.g. a relay send that may be
+ * rejected because the socket isn't open).
+ */
+export type Result<T, E = Error> = { ok: true; value: T } | { ok: false; error: E }
+
+export function ok<T>(value: T): Result<T, never> {
+  return { ok: true, value }
+}
+
+export function err<E>(error: E): Result<never, E> {
+  return { ok: false, error }
 }
