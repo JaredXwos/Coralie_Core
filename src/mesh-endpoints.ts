@@ -1,0 +1,12 @@
+/** Default relay + ICE endpoints. Overridable wherever they're consumed. */
+export const DEFAULT_MESH_ENDPOINTS = {
+  relayUrls: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://nostr.oxtr.dev', 'wss://purplerelay.com'],
+  iceServers: [
+    { urls: ['stun:stun.l.google.com:19302'] },
+    { urls: ['stun:stun1.l.google.com:19302'] },
+    { urls: ['stun:stun2.l.google.com:19302'] },
+    { urls: ['stun:stun3.l.google.com:19302'] },
+    { urls: ['stun:stun4.l.google.com:19302'] },
+    { urls: ['stun:stun.cloudflare.com:3478'] },
+  ] satisfies RTCIceServer[],
+}
