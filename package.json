@@ -1,13 +1,13 @@
 {
   "name": "nostr-webrtc-mesh",
   "version": "0.0.0",
-  "description": "Fast, gossip-style WebRTC mesh networking over Nostr signalling",
+  "description": "Fast, lightweight peer to peer messaging via WebRTC over Nostr. Gossip-based peer discovery, no central roster, minimal handshake overhead.",
   "type": "module",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.cjs"
     }
   },
   "main": "./dist/index.cjs",
@@ -19,7 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest watch",
     "test:integration": "vitest run --reporter=verbose --grep @integration",
-    "build": "tsup src/index.ts --format esm,cjs,umd --dts --sourcemap --global-name NostrWebRTCMesh"
+    "build": "tsup src/index.ts --format esm,cjs,iife --dts --sourcemap --global-name CoralieCore"
   },
   "keywords": [
     "nostr",
