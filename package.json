@@ -20,7 +20,7 @@
     "test:watch": "vitest watch",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
-    "build": "tsup src/index.ts --format esm,cjs,iife --global-name CoralieCore --dts"
+    "build": "tsup"
   },
   "keywords": [
     "nostr",

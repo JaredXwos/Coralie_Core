@@ -52,14 +52,17 @@ export class LiveConnectionManager implements LiveConnectionManager {
   private peerConnectionFactory: PeerConnectionFactory
   private timeoutCheckInterval: number | null = null
   private closed = false
+  private handshakeTimeoutMs: number
 
   constructor(
     signalingClient: SignallingClient,
     peerConnectionFactory: PeerConnectionFactory,
+    handshakeTimeoutMs?: number,
   ) {
     this.myPubkeyHex = signalingClient.myPubkeyHex
     this.signalingClient = signalingClient
     this.peerConnectionFactory = peerConnectionFactory
+    this.handshakeTimeoutMs = handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS
 
     this.peers = createStateFlow(new Set<MeshPeer>())
     this.incomingMessages = createSharedFlow<PeerMessage>()
@@ -81,7 +84,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
         } else if (frame.type === 'Answer') {
           this.onInboundAnswer(message.fromPubkeyHex, frame.sessionDescription)
         } else if (frame.type === 'Announce') {
-          this.onInboundAnnounce(message.fromPubkeyHex, frame.pubkeys)
+          this.onInboundAnnounce(message.fromPubkeyHex, frame.pubkeyHex)
         }
       } catch (err) {
         console.error(`Failed to parse signalling frame from ${message.fromPubkeyHex}:`, err)
@@ -110,7 +113,10 @@ export class LiveConnectionManager implements LiveConnectionManager {
   }
 
   private startInitiation(pubkeyHex: string): void {
-    const connection = new LiveInitiator({ peerConnectionFactory: this.peerConnectionFactory })
+    const connection = new LiveInitiator({
+      peerConnectionFactory: this.peerConnectionFactory,
+      handshakeTimeoutMs: this.handshakeTimeoutMs,
+    })
 
     const slot: InitiatingSlot = {
       connection,
@@ -180,11 +186,9 @@ export class LiveConnectionManager implements LiveConnectionManager {
 
     // Accept: become answerer
     const answerer = new LiveAnswerer({ peerConnectionFactory: this.peerConnectionFactory })
-    
-    // Queue the offer creation since we need to accept it after construction
-    this.acceptOfferInAnswerer(fromPubkeyHex, answerer, offer)
 
-    // Watch for connection state changes
+    // Watch for connection state changes (wired up before accepting the offer
+    // so we can't miss a synchronous/near-synchronous 'Connected' transition)
     answerer.state.subscribe((state) => {
       if (this.closed) return
       if (this.initiating.has(fromPubkeyHex)) return // Should not happen in answer path
@@ -196,7 +200,9 @@ export class LiveConnectionManager implements LiveConnectionManager {
       }
     })
 
-    // Create and send answer
+    // Create and send the answer (exactly once — calling this twice would run
+    // setRemoteDescription()/setLocalDescription() a second time on the same
+    // RTCPeerConnection, which real WebRTC treats as a fresh renegotiation)
     this.acceptOfferInAnswerer(fromPubkeyHex, answerer, offer)
   }
 
@@ -277,7 +283,10 @@ export class LiveConnectionManager implements LiveConnectionManager {
     slot.attemptCount += 1
     slot.startedAt = Date.now()
 
-    const newConnection = new LiveInitiator({ peerConnectionFactory: this.peerConnectionFactory })
+    const newConnection = new LiveInitiator({
+      peerConnectionFactory: this.peerConnectionFactory,
+      handshakeTimeoutMs: this.handshakeTimeoutMs,
+    })
     slot.connection = newConnection
 
     // Watch for failures on the new attempt
@@ -326,13 +335,14 @@ export class LiveConnectionManager implements LiveConnectionManager {
       if (this.closed) return
       if (this.connected.get(pubkeyHex) !== peerLink) return // Stale
 
-      if (state === 'Closed' || state === 'Failed') {
+      if (state === 'closed') {
         this.onLinkClosed(pubkeyHex)
       }
     })
 
-    // Broadcast Announce: pubkeys of all other connected peers
-    this.broadcastAnnounce()
+    // §2 rule 5: broadcast an Announce for this new pubkey to every *other*
+    // connected peer (not a roster — just the one peer that just joined).
+    this.broadcastAnnounce(pubkeyHex)
   }
 
   private onIncomingDataChannel(fromPubkeyHex: string, bytes: Uint8Array): void {
@@ -350,7 +360,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
           payload: frame.payload,
         })
       } else if (frame.type === 'Announce') {
-        this.onInboundAnnounce(fromPubkeyHex, frame.pubkeys)
+        this.onInboundAnnounce(fromPubkeyHex, frame.pubkeyHex)
       }
     } catch (err) {
       console.error(`Failed to parse data channel frame from ${fromPubkeyHex}:`, err)
@@ -381,42 +391,38 @@ export class LiveConnectionManager implements LiveConnectionManager {
   }
 
   /**
-   * Broadcast Announce frame to all connected peers except self.
-   * Payload: list of all other connected peer pubkeys.
-   * Best-effort, no retry, no acknowledgement.
+   * §2 rule 5: broadcast an Announce for one newly-connected pubkey to every
+   * *other* connected peer. This is not a roster sync — the recipient learns
+   * about exactly one new peer, not the sender's full connected set — and the
+   * newly-connected peer itself is excluded (it doesn't need telling about
+   * its own connection). Best-effort, no retry, no acknowledgement.
    */
-  private broadcastAnnounce(): void {
-    if (this.connected.size <= 1) return // Nothing to announce
-
-    const pubkeys = Array.from(this.connected.keys())
+  private broadcastAnnounce(newPubkeyHex: string): void {
     const frame: DataChannelFrame = {
       type: 'Announce',
-      pubkeys,
+      pubkeyHex: newPubkeyHex,
     }
+    const bytes = new TextEncoder().encode(JSON.stringify(frame))
 
     for (const [peerPubkey, peerLink] of this.connected.entries()) {
-      const bytes = new TextEncoder().encode(JSON.stringify(frame))
+      if (peerPubkey === newPubkeyHex) continue // Don't tell the new peer about itself
       peerLink.send(bytes)
     }
   }
 
   /**
-   * Inbound Announce handling: learn new peers via gossip (§2 rule 5).
-   * For each pubkey in the announce:
-   * - If already `initiating` or `connected`: no-op (idempotent)
-   * - Otherwise: call `addPeer()` (same entry point, same idempotency)
+   * Inbound Announce handling: learn a new peer via gossip (§2 rule 5).
+   * If already `initiating` or `connected`: no-op (idempotent).
+   * Otherwise: call `addPeer()` (same entry point, same idempotency).
    */
-  private onInboundAnnounce(fromPubkeyHex: string, pubkeys: string[]): void {
+  private onInboundAnnounce(fromPubkeyHex: string, pubkeyHex: string): void {
     if (this.closed) return
+    if (pubkeyHex === this.myPubkeyHex) return // Ignore self
+    if (this.initiating.has(pubkeyHex)) return // Already initiating
+    if (this.connected.has(pubkeyHex)) return // Already connected
 
-    for (const pubkey of pubkeys) {
-      if (pubkey === this.myPubkeyHex) continue // Ignore self
-      if (this.initiating.has(pubkey)) continue // Already initiating
-      if (this.connected.has(pubkey)) continue // Already connected
-
-      // Learn new peer via gossip
-      this.addPeer(pubkey)
-    }
+    // Learn new peer via gossip
+    this.addPeer(pubkeyHex)
   }
 
   /**
@@ -428,7 +434,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
     const expired: string[] = []
 
     for (const [pubkeyHex, slot] of this.initiating.entries()) {
-      if (now - slot.startedAt >= HANDSHAKE_TIMEOUT_MS) {
+      if (now - slot.startedAt >= this.handshakeTimeoutMs) {
         expired.push(pubkeyHex)
       }
     }

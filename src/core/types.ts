@@ -37,7 +37,7 @@ export type DataChannelFrame =
   | { type: 'Offer'; sessionDescription: SessionDescriptionData; attemptCount: number }
   | { type: 'Answer'; sessionDescription: SessionDescriptionData }
   | { type: 'IceCandidate'; candidate: RTCIceCandidateInit }
-  | { type: 'Announce'; pubkeys: string[] }
+  | { type: 'Announce'; pubkeyHex: string }
   | { type: 'Data'; payload: Uint8Array }
 
 /**

@@ -489,36 +489,83 @@ Test suites validating rule logic in isolation with mocked signalling and real
 
 All 112 tests pass (102 passed, 10 skipped placeholder tests for Phase 6).
 
-### Phase 5 — Factory & defaults
+### Phase 5 — Factory & defaults ✅ COMPLETE
 
-**Builds:** `mesh-endpoints.ts`, `create-live-connection-manager.ts`,
-`index.ts` (trimmed)
+**Built:** `mesh-endpoints.ts`, `src/create-live-connection-manager.ts`,
+`src/index.ts` (trimmed), `src/connection/index.ts`, `src/exports.test.ts`
 
-- Wires `Signer.generate()`, the relay/ICE endpoint lists (defaults or
-  overrides), the signalling client, and `LiveConnectionManager`
-  together into one function.
-- `index.ts` is trimmed to export exactly the public surface from §5
-  — nothing more.
+- Wires `LiveSigner.generate()`, the relay/ICE endpoint lists (defaults
+  or overrides), a `LiveNostrSignallingClient`, and `LiveConnectionManager`
+  together into one function, `createLiveConnectionManager(options?)`.
+- Returns synchronously — no `await` required. The signalling client's
+  relay connections happen in the background; `peers`, `incomingMessages`,
+  and `terminalFailures` are subscribable immediately.
+- Each call produces a fresh identity (new keypair). No persistence, no
+  restore path — a caller needing a stable identity across instances
+  must manage a `Signer` externally (unsupported internal API).
+- `src/index.ts` is trimmed to export exactly the public surface from
+  §5 — `createLiveConnectionManager`, `CreateLiveConnectionManagerOptions`,
+  `LiveConnectionManager`, `MeshPeer`, `PeerMessage`, `TerminalFailure`,
+  `LinkState`, `StateFlow`, `SharedFlow`. Everything under `crypto/`,
+  `nostr/`, and `webrtc/` is no longer re-exported.
 
-**Unit tests:**
-- `create-live-connection-manager.test.ts` — omitting `relayUrls`
-  falls back to `DEFAULT_MESH_ENDPOINTS.relayUrls`; providing an
-  override list is used verbatim (not merged with defaults); same for
-  `iceServers`; the returned manager's `myPubkeyHex` is a fresh,
-  valid, distinct identity on every call (two calls in the same test
-  never produce the same pubkey).
-- A build-output test (can run in CI, not necessarily under the same
-  test runner): import from the published entry point and assert only
-  the documented exports are present — guards against accidentally
-  leaking an internal module through a stray re-export.
+**File placement note:** `create-live-connection-manager.ts` and its
+test live at `src/` root, as siblings of `index.ts` — not inside
+`src/connection/`. Its imports (`./connection/live-connection-manager`,
+`./crypto/signer/signer.live`, etc.) are relative to `src/`, so nesting
+it under `connection/` breaks module resolution.
 
-### Phase 6 — End-to-end integration tests
+**Unit tests** (`create-live-connection-manager.test.ts`, 23 tests):
+- Omitting `relayUrls` falls back to `DEFAULT_MESH_ENDPOINTS.relayUrls`;
+  providing an override list is used verbatim (not merged with defaults);
+  same for `iceServers`.
+- The returned manager's `myPubkeyHex` is a fresh, valid 64-hex-char
+  identity on every call; three consecutive calls produce three distinct
+  pubkeys.
+- Full interface surface present (`peers`, `incomingMessages`,
+  `terminalFailures`, `addPeer`, `sendToPeer`, `close`).
+- `handshakeTimeoutMs` accepted and defaults sensibly when omitted.
+- `close()` is idempotent; multiple managers are independent.
+- Creation is synchronous (no `await` needed).
+
+**Build-output test** (`exports.test.ts`, 9 tests) — imports from
+`dist/index.js` (the actual bundled artifact, not `src/`) and asserts:
+- `createLiveConnectionManager` and `LinkState` are the only two
+  runtime-visible exports (TypeScript interfaces/types are erased at
+  compile time, so they don't appear as JS runtime properties — the
+  `.d.ts` file is the source of truth for the type-only exports).
+- None of the internal `Live*`/`Mock*` classes, `create*Flow` factories,
+  or `DEFAULT_MESH_ENDPOINTS` leak through.
+- Guards against accidentally reintroducing an `export *` line in
+  `index.ts` — this test **requires a fresh `npm run build`** before
+  running, since it reads the build artifact, not the source. Running
+  `npm test` alone against a stale `dist/` will report false failures
+  or false passes depending on what was last built.
+
+**Status:** All 134 unit tests pass (23 factory + 9 export-surface +
+102 from Phases 1–4, unchanged). `npm run build` succeeds in all four
+output formats (ESM, CJS, IIFE, DTS).
+
+### Phase 6 — End-to-end integration tests 📋 SPECIFIED, NOT YET BUILT
 
 Everything up to here has been unit-level with mocks at the module
-boundary. This phase exercises real `RTCPeerConnection`s and, where
-gated, real public relays together — this is the level at which the
-six rules in §2 are actually validated as *emergent* behavior, not
-just unit-tested in isolation.
+boundary, with one exception: `src/demo.spec.ts` already contains a
+real-`RTCPeerConnection` Playwright test (see Phase 3) that drives
+`LiveInitiator`/`LiveAnswerer` directly to a loopback `Connected` state
+and exchanges one data-channel message. That test exists and passes
+today — it validates the WebRTC layer in isolation, not the
+orchestrator.
+
+**Phase 6 as described below — tests at the `LiveConnectionManager` /
+`createLiveConnectionManager` level, covering the six rules in §2 as
+*emergent* behavior across two or three independent manager instances
+— does not yet exist as a runnable file.** No `src/*.spec.ts` or
+`src/*.integration.test.ts` implementing the five scenarios below has
+been added to the package, and none has been executed against the
+current build. The scenarios remain a specification to build against,
+not a completed deliverable. This is the level at which the six rules
+in §2 are actually validated as emergent behavior across independently-
+instantiated managers, not just unit-tested against mocks in isolation.
 
 - **Two-peer happy path** — two full `ConnectionManager` instances
   (real WebRTC, mocked or real signalling per test variant), one calls
@@ -558,3 +605,18 @@ gated behind an explicit `test:integration` script, kept out of the
 default fast unit-test run, and clearly documented as depending on
 either real public relay availability or (for the WebRTC-only tests) a
 real browser test runtime.
+
+---
+
+## Current status
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1–3 | Crypto, Nostr, WebRTC component layers | ✅ Built, unit-tested |
+| 4 | Orchestrator (`LiveConnectionManager`) | ✅ Built, unit-tested (11 tests) |
+| 5 | Factory (`createLiveConnectionManager`) + trimmed public API | ✅ Built, unit-tested (23 + 9 tests) |
+| 6 | Manager-level end-to-end integration tests | 📋 Specified above, not yet implemented |
+
+134 unit tests pass across Phases 1–5. `src/demo.spec.ts` is a real
+browser test but exercises `Initiator`/`Answerer` directly, not the
+orchestrator — it does not substitute for Phase 6.

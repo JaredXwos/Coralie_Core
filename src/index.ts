@@ -1,36 +1,29 @@
 /**
- * Root export surface.
+ * Root export surface (Phase 5).
  *
- * PROVISIONAL: per §5 of the architecture doc, the eventual public API
- * is meant to be just `createLiveConnectionManager()` plus a handful
- * of types — everything under `crypto/`, `nostr/`, and `webrtc/` is
- * supposed to be internal, never re-exported. That trim happens in
- * Phase 5 once the factory exists.
+ * Per §5 of the architecture doc, the public API is:
+ * - `createLiveConnectionManager()` — factory function
+ * - `LiveConnectionManager` — orchestrator interface
+ * - `MeshPeer` — lightweight peer metadata
+ * - `PeerMessage` — application-level message type
+ * - `TerminalFailure` — retry exhaustion event
+ * - `CreateLiveConnectionManagerOptions` — factory configuration
  *
- * Until then, this file re-exports every component's public surface
- * (interface + Live + Mock) so the package is usable end-to-end for
- * development, the browser demo, and early integration testing.
+ * Everything under `crypto/`, `nostr/`, and `webrtc/` is internal.
+ * Development, testing, and examples use this single entry point.
  */
 
-// Shared data types
-export * from './core/types'
-export * from './mesh-endpoints'
+// Factory and public API
+export { createLiveConnectionManager } from './create-live-connection-manager'
+export type { CreateLiveConnectionManagerOptions } from './create-live-connection-manager'
 
-// Core pub/sub primitives
-export * from './core/state-flow'
-export * from './core/shared-flow'
+// Orchestrator interface and lightweight types
+export type { LiveConnectionManager, MeshPeer } from './connection/live-connection-manager.interface'
 
-// Crypto
-export * from './crypto/signer'
+// Application-level types and enums
+export { LinkState } from './core/types'
+export type { PeerMessage, TerminalFailure } from './core/types'
 
-// Nostr layer
-export * from './nostr/event-sink'
-export * from './nostr/relay-socket'
-export * from './nostr/relay-session'
-export * from './nostr/signalling-client'
-
-// WebRTC layer
-export * from './webrtc/peer-connection'
-export * from './webrtc/peer-link'
-export * from './webrtc/initiator'
-export * from './webrtc/answerer'
+// Shared flow for observing events
+export type { StateFlow } from './core/state-flow'
+export type { SharedFlow } from './core/shared-flow'

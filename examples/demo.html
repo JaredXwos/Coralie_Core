@@ -220,12 +220,20 @@
 
 </main>
 
-<!-- Local build of the package -->
+<!-- Public build of the package -->
 <script src="../dist/index.global.js"></script>
+<!-- Internal-only build for this test/demo page — see src/internal-testing-exports.ts.
+     Never shipped to consumers; exists purely so this page and the Phase 6
+     Playwright harness can reach crypto/nostr/webrtc internals directly. -->
+<script src="../dist/internal-testing.global.js"></script>
 <script>
-  // Ensure CoralieCore is on window (IIFE creates var CoralieCore but we need it global)
+  // Ensure both globals are on window (IIFE creates top-level vars but we
+  // want them explicitly on window for page.evaluate() in Playwright).
   if (typeof CoralieCore !== 'undefined') {
     window.CoralieCore = CoralieCore;
+  }
+  if (typeof CoralieInternal !== 'undefined') {
+    window.CoralieInternal = CoralieInternal;
   }
 </script>
 <script>
@@ -233,15 +241,14 @@
   const {
     LiveSigner,
     LiveRelaySocket,
-    LiveRelaySession,
     LiveNostrSignallingClient,
     LiveInitiator,
     LiveAnswerer,
     createLivePeerConnectionFactory,
-    RelaySocketState,
     LinkState,
     DEFAULT_MESH_ENDPOINTS,
-  } = window.CoralieCore;
+  } = window.CoralieInternal;
+
 
   // ---------- small DOM helpers ----------
   const $ = (id) => document.getElementById(id);
@@ -447,6 +454,185 @@
   $('chat-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') $('btn-chat-send').click();
   });
+})();
+
+// ========== PHASE 6 E2E TEST HARNESS ==========
+// These functions are called directly from Playwright tests.
+//
+// Uses the internal bundle's LiveConnectionManager class + createLivePeerConnectionFactory
+// directly (constructor injection), the same way the Phase 4/5 unit tests do — rather than
+// going through the public createLiveConnectionManager() factory and trying to intercept its
+// private signalling client after the fact, which isn't reachable through the public interface.
+(function() {
+  const { LiveConnectionManager, createLivePeerConnectionFactory } = window.CoralieInternal;
+
+  // Test managers map (keyed by pubkeyHex) for cleanup
+  const testManagers = new Map();
+
+  /**
+   * Shared in-memory relay for e2e tests.
+   * Routes signalling frames between test managers by pubkeyHex.
+   */
+  const testRelay = {
+    routes: new Map(),
+
+    registerManager(pubkey, deliver) {
+      this.routes.set(pubkey, deliver)
+    },
+
+    unregisterManager(pubkey) {
+      this.routes.delete(pubkey)
+    },
+
+    send(fromPubkey, toPubkey, payload) {
+      const deliver = this.routes.get(toPubkey)
+      if (!deliver) {
+        console.log(`[relay] no route for ${toPubkey.slice(0, 8)}`)
+        return false
+      }
+      // Simulate async delivery (matches real relay latency characteristics)
+      setTimeout(() => deliver(fromPubkey, payload), 2)
+      return true
+    }
+  };
+
+  /**
+   * Mock SignallingClient — implements the same interface LiveNostrSignallingClient
+   * does (myPubkeyHex, send(), inbound.subscribe(), close()), routed through the
+   * shared in-memory testRelay instead of real Nostr relays.
+   */
+  class TestSignallingClient {
+    constructor(pubkeyHex) {
+      this.myPubkeyHex = pubkeyHex
+      this._subscribers = []
+      this.inbound = {
+        subscribe: (fn) => {
+          this._subscribers.push(fn)
+          return { unsubscribe: () => {
+            this._subscribers = this._subscribers.filter((s) => s !== fn)
+          }}
+        }
+      }
+      testRelay.registerManager(pubkeyHex, (fromPubkeyHex, payload) => {
+        this._subscribers.forEach((fn) => fn({ fromPubkeyHex, payload }))
+      })
+    }
+
+    send(toPubkeyHex, payload) {
+      const ok = testRelay.send(this.myPubkeyHex, toPubkeyHex, payload)
+      return { ok }
+    }
+
+    close() {
+      testRelay.unregisterManager(this.myPubkeyHex)
+    }
+  }
+
+  /**
+   * Create a test manager for e2e testing: real WebRTC (via createLivePeerConnectionFactory),
+   * mock signalling (via TestSignallingClient/testRelay). Returns a plain-object wrapper
+   * exposing the same surface as the public LiveConnectionManager interface.
+   */
+  window.createE2ETestManager = (pubkeyHex, handshakeTimeoutMs) => {
+    const signalingClient = new TestSignallingClient(pubkeyHex)
+    const peerConnectionFactory = createLivePeerConnectionFactory({ iceServers: [] })
+
+    const manager = new LiveConnectionManager(signalingClient, peerConnectionFactory, handshakeTimeoutMs)
+    testManagers.set(pubkeyHex, manager)
+
+    return {
+      myPubkeyHex: manager.myPubkeyHex,
+      peers: manager.peers,
+      incomingMessages: manager.incomingMessages,
+      terminalFailures: manager.terminalFailures,
+      addPeer: (pubkey) => manager.addPeer(pubkey),
+      sendToPeer: (pubkey, msg) => manager.sendToPeer(pubkey, msg),
+      close: () => {
+        manager.close()
+        signalingClient.close()
+        testManagers.delete(pubkeyHex)
+      }
+    }
+  }
+
+  /**
+   * Wait for a manager to connect to a peer.
+   */
+  window.waitForPeerConnection = async (manager, targetPubkey, timeoutMs = 10000) => {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const hasPeer = Array.from(manager.peers.value || []).some(p => p.pubkeyHex === targetPubkey)
+      if (hasPeer) return true
+      await new Promise(r => setTimeout(r, 50))
+    }
+    return false
+  }
+
+  /**
+   * Wait for a manager to receive a message from a specific peer.
+   */
+  window.waitForMessage = async (manager, fromPubkey, timeoutMs = 5000) => {
+    return new Promise((resolve) => {
+      const deadline = Date.now() + timeoutMs
+      const unsub = manager.incomingMessages.subscribe((msg) => {
+        if (!fromPubkey || msg.fromPubkeyHex === fromPubkey) {
+          unsub()
+          resolve(msg)
+        }
+      })
+      
+      const check = () => {
+        if (Date.now() < deadline) {
+          setTimeout(check, 25)
+        } else {
+          unsub()
+          resolve(null)
+        }
+      }
+      check()
+    })
+  }
+  
+  /**
+   * Wait for a terminal failure on a manager.
+   */
+  window.waitForTerminalFailure = async (manager, timeoutMs = 5000) => {
+    return new Promise((resolve) => {
+      const deadline = Date.now() + timeoutMs
+      const unsub = manager.terminalFailures.subscribe((failure) => {
+        unsub()
+        resolve(failure)
+      })
+      
+      const check = () => {
+        if (Date.now() < deadline) {
+          setTimeout(check, 25)
+        } else {
+          unsub()
+          resolve(null)
+        }
+      }
+      check()
+    })
+  }
+  
+  /**
+   * Get peers currently connected to a manager.
+   */
+  window.getConnectedPeers = (manager) => {
+    return Array.from(manager.peers.value || []).map(p => p.pubkeyHex)
+  }
+  
+  /**
+   * Clean up all test managers.
+   */
+  window.cleanupAllTestManagers = () => {
+    for (const manager of testManagers.values()) {
+      manager.close()
+    }
+    testManagers.clear()
+    testRelay.routes.clear()
+  }
 })();
 </script>
 

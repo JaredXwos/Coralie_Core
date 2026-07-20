@@ -207,12 +207,12 @@ describe('LiveConnectionManager — Six Core Rules', () => {
     it('inbound Announce learning new peer calls addPeer idempotently', async () => {
       const sendSpy = vi.spyOn(signalingClient, 'send').mockReturnValue({ ok: true })
 
-      signalingClient.emitInbound('source-peer', JSON.stringify({ type: 'Announce', pubkeys: ['new-peer'] }))
+      signalingClient.emitInbound('source-peer', JSON.stringify({ type: 'Announce', pubkeyHex: 'new-peer' }))
       await vi.advanceTimersByTimeAsync(100)
 
       const firstCallCount = sendSpy.mock.calls.length
 
-      signalingClient.emitInbound('source-peer', JSON.stringify({ type: 'Announce', pubkeys: ['new-peer'] }))
+      signalingClient.emitInbound('source-peer', JSON.stringify({ type: 'Announce', pubkeyHex: 'new-peer' }))
       await vi.advanceTimersByTimeAsync(100)
 
       expect(sendSpy.mock.calls.length).toBe(firstCallCount)

@@ -23,75 +23,9 @@ var CoralieCore = (() => {
   // src/index.ts
   var index_exports = {};
   __export(index_exports, {
-    DEFAULT_MESH_ENDPOINTS: () => DEFAULT_MESH_ENDPOINTS,
     LinkState: () => LinkState,
-    LiveAnswerer: () => LiveAnswerer,
-    LiveDedupingEventSink: () => LiveDedupingEventSink,
-    LiveInitiator: () => LiveInitiator,
-    LiveNostrSignallingClient: () => LiveNostrSignallingClient,
-    LivePeerConnection: () => LivePeerConnection,
-    LivePeerLink: () => LivePeerLink,
-    LiveRelaySession: () => LiveRelaySession,
-    LiveRelaySocket: () => LiveRelaySocket,
-    LiveSharedFlow: () => LiveSharedFlow,
-    LiveSigner: () => LiveSigner,
-    LiveStateFlow: () => LiveStateFlow,
-    MockAnswerer: () => MockAnswerer,
-    MockDataChannel: () => MockDataChannel,
-    MockEventSink: () => MockEventSink,
-    MockInitiator: () => MockInitiator,
-    MockPeerConnection: () => MockPeerConnection,
-    MockPeerLink: () => MockPeerLink,
-    MockRelaySession: () => MockRelaySession,
-    MockRelaySocket: () => MockRelaySocket,
-    MockSharedFlow: () => MockSharedFlow,
-    MockSignallingClient: () => MockSignallingClient,
-    MockSigner: () => MockSigner,
-    MockStateFlow: () => MockStateFlow,
-    RelaySocketState: () => RelaySocketState,
-    SIGNALLING_KIND: () => SIGNALLING_KIND,
-    createLinkedMockPeerConnections: () => createLinkedMockPeerConnections,
-    createLivePeerConnectionFactory: () => createLivePeerConnectionFactory,
-    createMockSharedFlow: () => createMockSharedFlow,
-    createMockStateFlow: () => createMockStateFlow,
-    createSharedFlow: () => createSharedFlow,
-    createStateFlow: () => createStateFlow,
-    err: () => err,
-    exponentialBackoff: () => exponentialBackoff,
-    ok: () => ok,
-    pubkeyForSeed: () => pubkeyForSeed
+    createLiveConnectionManager: () => createLiveConnectionManager
   });
-
-  // src/core/types.ts
-  var LinkState = /* @__PURE__ */ ((LinkState2) => {
-    LinkState2["Initiating"] = "Initiating";
-    LinkState2["Offering"] = "Offering";
-    LinkState2["Answering"] = "Answering";
-    LinkState2["Connecting"] = "Connecting";
-    LinkState2["Connected"] = "Connected";
-    LinkState2["Failed"] = "Failed";
-    LinkState2["Closed"] = "Closed";
-    return LinkState2;
-  })(LinkState || {});
-  function ok(value) {
-    return { ok: true, value };
-  }
-  function err(error) {
-    return { ok: false, error };
-  }
-
-  // src/mesh-endpoints.ts
-  var DEFAULT_MESH_ENDPOINTS = {
-    relayUrls: ["wss://relay.damus.io", "wss://nos.lol", "wss://nostr.oxtr.dev", "wss://purplerelay.com"],
-    iceServers: [
-      { urls: ["stun:stun.l.google.com:19302"] },
-      { urls: ["stun:stun1.l.google.com:19302"] },
-      { urls: ["stun:stun2.l.google.com:19302"] },
-      { urls: ["stun:stun3.l.google.com:19302"] },
-      { urls: ["stun:stun4.l.google.com:19302"] },
-      { urls: ["stun:stun.cloudflare.com:3478"] }
-    ]
-  };
 
   // src/core/state-flow/state-flow.live.ts
   var LiveStateFlow = class {
@@ -125,42 +59,22 @@ var CoralieCore = (() => {
     return new LiveStateFlow(initial);
   }
 
-  // src/core/state-flow/state-flow.mock.ts
-  var MockStateFlow = class {
-    constructor(initial) {
-      this.listeners = /* @__PURE__ */ new Set();
-      this.current = initial;
-      this.history = [initial];
-    }
-    get value() {
-      return this.current;
-    }
-    set value(next) {
-      this.current = next;
-      this.history.push(next);
-      for (const listener of this.listeners) listener(this.current);
-    }
-    /** Number of currently-active subscribers. */
-    get listenerCount() {
-      return this.listeners.size;
-    }
-    subscribe(listener) {
-      this.listeners.add(listener);
-      listener(this.current);
-      return () => this.listeners.delete(listener);
-    }
-    asReadOnly() {
-      const self = this;
-      return {
-        get value() {
-          return self.value;
-        },
-        subscribe: (listener) => self.subscribe(listener)
-      };
-    }
-  };
-  function createMockStateFlow(initial) {
-    return new MockStateFlow(initial);
+  // src/core/types.ts
+  var LinkState = /* @__PURE__ */ ((LinkState2) => {
+    LinkState2["Initiating"] = "Initiating";
+    LinkState2["Offering"] = "Offering";
+    LinkState2["Answering"] = "Answering";
+    LinkState2["Connecting"] = "Connecting";
+    LinkState2["Connected"] = "Connected";
+    LinkState2["Failed"] = "Failed";
+    LinkState2["Closed"] = "Closed";
+    return LinkState2;
+  })(LinkState || {});
+  function ok(value) {
+    return { ok: true, value };
+  }
+  function err(error) {
+    return { ok: false, error };
   }
 
   // src/core/shared-flow/shared-flow.live.ts
@@ -183,31 +97,730 @@ var CoralieCore = (() => {
     return new LiveSharedFlow();
   }
 
-  // src/core/shared-flow/shared-flow.mock.ts
-  var MockSharedFlow = class {
-    constructor() {
-      /** Every value ever emitted, in order. */
-      this.emissions = [];
-      this.listeners = /* @__PURE__ */ new Set();
+  // src/webrtc/peer-link/peer-link.live.ts
+  var LivePeerLink = class {
+    constructor(channel) {
+      this.channel = channel;
+      this.stateFlow = createStateFlow("open");
+      this.incomingBytesFlow = createSharedFlow();
+      this.channel.onmessage = (ev) => {
+        this.incomingBytesFlow.emit(ev.data);
+      };
+      this.channel.onclose = () => {
+        this.stateFlow.value = "closed";
+      };
     }
-    emit(value) {
-      this.emissions.push(value);
-      for (const listener of this.listeners) listener(value);
+    get state() {
+      return this.stateFlow.asReadOnly();
     }
-    get listenerCount() {
-      return this.listeners.size;
+    get incomingBytes() {
+      return this.incomingBytesFlow.asReadOnly();
     }
-    subscribe(listener) {
-      this.listeners.add(listener);
-      return () => this.listeners.delete(listener);
+    send(data) {
+      if (this.stateFlow.value !== "open") {
+        throw new Error("cannot send on a closed PeerLink");
+      }
+      this.channel.send(data);
     }
-    asReadOnly() {
-      return { subscribe: (listener) => this.subscribe(listener) };
+    close() {
+      if (this.stateFlow.value === "closed") return;
+      this.stateFlow.value = "closed";
+      this.channel.close();
     }
   };
-  function createMockSharedFlow() {
-    return new MockSharedFlow();
+
+  // src/webrtc/initiator/initiator.live.ts
+  var DEFAULT_HANDSHAKE_TIMEOUT_MS = 3e4;
+  var DATA_CHANNEL_LABEL = "mesh";
+  var LiveInitiator = class {
+    constructor(options) {
+      this.stateFlow = createStateFlow("Initiating" /* Initiating */);
+      this.timeoutHandle = null;
+      this.link = null;
+      this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
+      this.pc = options.peerConnectionFactory();
+      this.pc.onconnectionstatechange = () => this.handleConnectionStateChange();
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get peerLink() {
+      return this.link;
+    }
+    async createOffer() {
+      const channel = this.pc.createDataChannel(DATA_CHANNEL_LABEL);
+      this.wireDataChannel(channel);
+      this.stateFlow.value = "Offering" /* Offering */;
+      const offer = await this.pc.createOffer();
+      this.stateFlow.value = "Connecting" /* Connecting */;
+      this.startHandshakeTimeout();
+      return offer;
+    }
+    async acceptAnswer(answer) {
+      if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
+      await this.pc.setRemoteDescription(answer);
+    }
+    close() {
+      this.clearHandshakeTimeout();
+      this.link?.close();
+      this.pc.close();
+      this.stateFlow.value = "Closed" /* Closed */;
+    }
+    wireDataChannel(channel) {
+      channel.onopen = () => {
+        if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
+        this.link = new LivePeerLink(channel);
+        this.clearHandshakeTimeout();
+        this.stateFlow.value = "Connected" /* Connected */;
+      };
+    }
+    handleConnectionStateChange() {
+      if (this.pc.connectionState === "failed") this.fail();
+    }
+    fail() {
+      if (this.stateFlow.value === "Failed" /* Failed */ || this.stateFlow.value === "Closed" /* Closed */) return;
+      this.clearHandshakeTimeout();
+      this.stateFlow.value = "Failed" /* Failed */;
+    }
+    startHandshakeTimeout() {
+      this.timeoutHandle = setTimeout(() => {
+        this.timeoutHandle = null;
+        if (this.stateFlow.value !== "Connected" /* Connected */) this.fail();
+      }, this.handshakeTimeoutMs);
+    }
+    clearHandshakeTimeout() {
+      if (this.timeoutHandle !== null) {
+        clearTimeout(this.timeoutHandle);
+        this.timeoutHandle = null;
+      }
+    }
+  };
+
+  // src/webrtc/answerer/answerer.live.ts
+  var LiveAnswerer = class {
+    constructor(options) {
+      this.stateFlow = createStateFlow("Answering" /* Answering */);
+      this.link = null;
+      this.pc = options.peerConnectionFactory();
+      this.pc.onconnectionstatechange = () => this.handleConnectionStateChange();
+      this.pc.ondatachannel = (ev) => this.wireDataChannel(ev.channel);
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get peerLink() {
+      return this.link;
+    }
+    async createAnswer(offer) {
+      await this.pc.setRemoteDescription(offer);
+      const answer = await this.pc.createAnswer();
+      this.stateFlow.value = "Connecting" /* Connecting */;
+      return answer;
+    }
+    close() {
+      this.link?.close();
+      this.pc.close();
+      this.stateFlow.value = "Closed" /* Closed */;
+    }
+    wireDataChannel(channel) {
+      channel.onopen = () => {
+        if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
+        this.link = new LivePeerLink(channel);
+        this.stateFlow.value = "Connected" /* Connected */;
+      };
+    }
+    handleConnectionStateChange() {
+      if (this.pc.connectionState !== "failed") return;
+      if (this.stateFlow.value === "Failed" /* Failed */ || this.stateFlow.value === "Closed" /* Closed */) return;
+      this.stateFlow.value = "Failed" /* Failed */;
+    }
+  };
+
+  // src/connection/live-connection-manager.ts
+  var HANDSHAKE_TIMEOUT_MS = 3e4;
+  var MAX_INITIATION_ATTEMPTS = 5;
+  var LiveConnectionManager = class {
+    constructor(signalingClient, peerConnectionFactory, handshakeTimeoutMs) {
+      this.initiating = /* @__PURE__ */ new Map();
+      this.connected = /* @__PURE__ */ new Map();
+      this.timeoutCheckInterval = null;
+      this.closed = false;
+      this.myPubkeyHex = signalingClient.myPubkeyHex;
+      this.signalingClient = signalingClient;
+      this.peerConnectionFactory = peerConnectionFactory;
+      this.handshakeTimeoutMs = handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
+      this.peers = createStateFlow(/* @__PURE__ */ new Set());
+      this.incomingMessages = createSharedFlow();
+      this.terminalFailures = createSharedFlow();
+      this.setupInboundSignalling();
+      this.startTimeoutChecker();
+    }
+    setupInboundSignalling() {
+      this.signalingClient.inbound.subscribe((message) => {
+        if (this.closed) return;
+        try {
+          const frame = JSON.parse(message.payload);
+          if (frame.type === "Offer") {
+            this.onInboundOffer(message.fromPubkeyHex, frame.sessionDescription, frame.attemptCount);
+          } else if (frame.type === "Answer") {
+            this.onInboundAnswer(message.fromPubkeyHex, frame.sessionDescription);
+          } else if (frame.type === "Announce") {
+            this.onInboundAnnounce(message.fromPubkeyHex, frame.pubkeyHex);
+          }
+        } catch (err2) {
+          console.error(`Failed to parse signalling frame from ${message.fromPubkeyHex}:`, err2);
+        }
+      });
+    }
+    startTimeoutChecker() {
+      this.timeoutCheckInterval = setInterval(() => {
+        if (this.closed) return;
+        this.checkTimeouts();
+      }, 1e3);
+    }
+    /**
+     * §2 rule 1: New pubkey learned → become initiator if conditions met.
+     * Idempotent: calling twice with same pubkey while `initiating` is a no-op.
+     */
+    addPeer(pubkeyHex) {
+      if (this.closed) return;
+      if (pubkeyHex === this.myPubkeyHex) return;
+      if (this.initiating.has(pubkeyHex)) return;
+      if (this.connected.has(pubkeyHex)) return;
+      this.startInitiation(pubkeyHex);
+    }
+    startInitiation(pubkeyHex) {
+      const connection = new LiveInitiator({
+        peerConnectionFactory: this.peerConnectionFactory,
+        handshakeTimeoutMs: this.handshakeTimeoutMs
+      });
+      const slot = {
+        connection,
+        attemptCount: 1,
+        startedAt: Date.now()
+      };
+      this.initiating.set(pubkeyHex, slot);
+      connection.state.subscribe((state) => {
+        if (this.closed) return;
+        if (this.initiating.get(pubkeyHex)?.connection !== connection) return;
+        if (state === "Connected") {
+          this.onLinkConnected(pubkeyHex, connection.peerLink);
+        } else if (state === "Failed") {
+          this.onAttemptFailed(pubkeyHex);
+        }
+      });
+      this.sendOfferAsync(pubkeyHex, connection);
+    }
+    async sendOfferAsync(pubkeyHex, initiator) {
+      try {
+        const offer = await initiator.createOffer();
+        if (this.closed) return;
+        if (this.initiating.get(pubkeyHex)?.connection !== initiator) return;
+        const frame = {
+          type: "Offer",
+          sessionDescription: offer,
+          attemptCount: this.initiating.get(pubkeyHex).attemptCount
+        };
+        const result = this.signalingClient.send(pubkeyHex, JSON.stringify(frame));
+        if (this.closed) return;
+        if (this.initiating.get(pubkeyHex)?.connection !== initiator) return;
+        if (!result.ok) {
+          this.onAttemptFailed(pubkeyHex);
+        }
+      } catch (err2) {
+        if (this.closed) return;
+        if (this.initiating.get(pubkeyHex)?.connection !== initiator) return;
+        console.error(`Failed to create/send offer to ${pubkeyHex}:`, err2);
+        this.onAttemptFailed(pubkeyHex);
+      }
+    }
+    /**
+     * §2 rule 2: Inbound offer handling.
+     * Accept only if:
+     * - sender is not already `connected`
+     * - `initiating` map is empty (global gate)
+     */
+    onInboundOffer(fromPubkeyHex, offer, attemptCount) {
+      if (this.closed) return;
+      if (this.connected.has(fromPubkeyHex)) return;
+      if (this.initiating.size > 0) return;
+      const answerer = new LiveAnswerer({ peerConnectionFactory: this.peerConnectionFactory });
+      answerer.state.subscribe((state) => {
+        if (this.closed) return;
+        if (this.initiating.has(fromPubkeyHex)) return;
+        if (state === "Connected") {
+          this.onLinkConnected(fromPubkeyHex, answerer.peerLink);
+        } else if (state === "Failed") {
+        }
+      });
+      this.acceptOfferInAnswerer(fromPubkeyHex, answerer, offer);
+    }
+    async acceptOfferInAnswerer(toPubkeyHex, answerer, offer) {
+      try {
+        const answer = await answerer.createAnswer(offer);
+        if (this.closed) return;
+        const frame = {
+          type: "Answer",
+          sessionDescription: answer
+        };
+        this.signalingClient.send(toPubkeyHex, JSON.stringify(frame));
+      } catch (err2) {
+        if (this.closed) return;
+        console.error(`Failed to create/send answer to ${toPubkeyHex}:`, err2);
+      }
+    }
+    /**
+     * §2 rule 3: Inbound answer handling.
+     * Match against in-flight initiation for the sender's pubkey.
+     * If no matching slot or slot has been superseded by a retry: no-op.
+     */
+    onInboundAnswer(fromPubkeyHex, answer) {
+      if (this.closed) return;
+      const slot = this.initiating.get(fromPubkeyHex);
+      if (!slot) return;
+      this.applyAnswerAsync(fromPubkeyHex, slot.connection, answer);
+    }
+    async applyAnswerAsync(pubkeyHex, initiator, answer) {
+      try {
+        await initiator.acceptAnswer(answer);
+        if (this.closed) return;
+        if (this.initiating.get(pubkeyHex)?.connection !== initiator) return;
+      } catch (err2) {
+        if (this.closed) return;
+        if (this.initiating.get(pubkeyHex)?.connection !== initiator) return;
+        console.error(`Failed to apply answer from ${pubkeyHex}:`, err2);
+        this.onAttemptFailed(pubkeyHex);
+      }
+    }
+    /**
+     * §2 rule 4: Attempt failure handling.
+     * Increment counter; if ≥ 5: remove pubkey and emit terminal failure.
+     * Otherwise: create fresh peer connection and retry.
+     */
+    onAttemptFailed(pubkeyHex) {
+      if (this.closed) return;
+      const slot = this.initiating.get(pubkeyHex);
+      if (!slot) return;
+      slot.connection.close();
+      if (slot.attemptCount >= MAX_INITIATION_ATTEMPTS) {
+        this.initiating.delete(pubkeyHex);
+        this.terminalFailures.emit({
+          pubkeyHex,
+          attemptCount: slot.attemptCount,
+          reason: "Exhausted maximum retry attempts"
+        });
+        return;
+      }
+      slot.attemptCount += 1;
+      slot.startedAt = Date.now();
+      const newConnection = new LiveInitiator({
+        peerConnectionFactory: this.peerConnectionFactory,
+        handshakeTimeoutMs: this.handshakeTimeoutMs
+      });
+      slot.connection = newConnection;
+      newConnection.state.subscribe((state) => {
+        if (this.closed) return;
+        if (this.initiating.get(pubkeyHex)?.connection !== newConnection) return;
+        if (state === "Connected") {
+          this.onLinkConnected(pubkeyHex, newConnection.peerLink);
+        } else if (state === "Failed") {
+          this.onAttemptFailed(pubkeyHex);
+        }
+      });
+      this.sendOfferAsync(pubkeyHex, newConnection);
+    }
+    /**
+     * §2 rule 5: Connection reaches open.
+     * Move from `initiating` to `connected`, broadcast `Announce` to all other
+     * connected peers (best-effort).
+     */
+    onLinkConnected(pubkeyHex, peerLink) {
+      if (this.closed) return;
+      this.initiating.delete(pubkeyHex);
+      this.connected.set(pubkeyHex, peerLink);
+      const updatedPeers = new Set(this.peers.value);
+      updatedPeers.add({ pubkeyHex, connectedAt: Date.now() });
+      this.peers.value = updatedPeers;
+      peerLink.incomingBytes.subscribe((bytes) => {
+        if (this.closed) return;
+        this.onIncomingDataChannel(pubkeyHex, bytes);
+      });
+      peerLink.state.subscribe((state) => {
+        if (this.closed) return;
+        if (this.connected.get(pubkeyHex) !== peerLink) return;
+        if (state === "closed") {
+          this.onLinkClosed(pubkeyHex);
+        }
+      });
+      this.broadcastAnnounce(pubkeyHex);
+    }
+    onIncomingDataChannel(fromPubkeyHex, bytes) {
+      if (this.closed) return;
+      try {
+        const text = new TextDecoder().decode(bytes);
+        const frame = JSON.parse(text);
+        if (frame.type === "Data") {
+          this.incomingMessages.emit({
+            from: fromPubkeyHex,
+            to: this.myPubkeyHex,
+            timestamp: Date.now(),
+            payload: frame.payload
+          });
+        } else if (frame.type === "Announce") {
+          this.onInboundAnnounce(fromPubkeyHex, frame.pubkeyHex);
+        }
+      } catch (err2) {
+        console.error(`Failed to parse data channel frame from ${fromPubkeyHex}:`, err2);
+      }
+    }
+    /**
+     * §2 rule 6: Connection closes or fails (post-open).
+     * Remove from `connected`. No re-announce, no cleanup broadcast.
+     */
+    onLinkClosed(pubkeyHex) {
+      if (this.closed) return;
+      const peerLink = this.connected.get(pubkeyHex);
+      if (!peerLink) return;
+      this.connected.delete(pubkeyHex);
+      peerLink.close();
+      const updatedPeers = new Set(this.peers.value);
+      updatedPeers.forEach((peer) => {
+        if (peer.pubkeyHex === pubkeyHex) {
+          updatedPeers.delete(peer);
+        }
+      });
+      this.peers.value = updatedPeers;
+    }
+    /**
+     * §2 rule 5: broadcast an Announce for one newly-connected pubkey to every
+     * *other* connected peer. This is not a roster sync — the recipient learns
+     * about exactly one new peer, not the sender's full connected set — and the
+     * newly-connected peer itself is excluded (it doesn't need telling about
+     * its own connection). Best-effort, no retry, no acknowledgement.
+     */
+    broadcastAnnounce(newPubkeyHex) {
+      const frame = {
+        type: "Announce",
+        pubkeyHex: newPubkeyHex
+      };
+      const bytes = new TextEncoder().encode(JSON.stringify(frame));
+      for (const [peerPubkey, peerLink] of this.connected.entries()) {
+        if (peerPubkey === newPubkeyHex) continue;
+        peerLink.send(bytes);
+      }
+    }
+    /**
+     * Inbound Announce handling: learn a new peer via gossip (§2 rule 5).
+     * If already `initiating` or `connected`: no-op (idempotent).
+     * Otherwise: call `addPeer()` (same entry point, same idempotency).
+     */
+    onInboundAnnounce(fromPubkeyHex, pubkeyHex) {
+      if (this.closed) return;
+      if (pubkeyHex === this.myPubkeyHex) return;
+      if (this.initiating.has(pubkeyHex)) return;
+      if (this.connected.has(pubkeyHex)) return;
+      this.addPeer(pubkeyHex);
+    }
+    /**
+     * Timeout checker: runs every 1s, checks all `initiating` slots for
+     * 30s elapsed time. Any slot that has exceeded timeout is marked failed.
+     */
+    checkTimeouts() {
+      const now = Date.now();
+      const expired = [];
+      for (const [pubkeyHex, slot] of this.initiating.entries()) {
+        if (now - slot.startedAt >= this.handshakeTimeoutMs) {
+          expired.push(pubkeyHex);
+        }
+      }
+      for (const pubkeyHex of expired) {
+        this.onAttemptFailed(pubkeyHex);
+      }
+    }
+    /**
+     * Send a message to a connected peer via data channel.
+     * If not connected: dropped silently.
+     */
+    sendToPeer(toPubkeyHex, payload) {
+      if (this.closed) return;
+      const peerLink = this.connected.get(toPubkeyHex);
+      if (!peerLink) return;
+      const frame = {
+        type: "Data",
+        payload
+      };
+      const bytes = new TextEncoder().encode(JSON.stringify(frame));
+      peerLink.send(bytes);
+    }
+    /**
+     * Close all connections and stop timers.
+     */
+    close() {
+      if (this.closed) return;
+      this.closed = true;
+      if (this.timeoutCheckInterval !== null) {
+        clearInterval(this.timeoutCheckInterval);
+      }
+      for (const slot of this.initiating.values()) {
+        slot.connection.close();
+      }
+      this.initiating.clear();
+      for (const peerLink of this.connected.values()) {
+        peerLink.close();
+      }
+      this.connected.clear();
+      this.signalingClient.close();
+    }
+  };
+
+  // src/nostr/event-sink/event-sink.live.ts
+  var DEFAULT_RETENTION_WINDOW_MS = 5 * 60 * 1e3;
+  var DEFAULT_MAX_ENTRIES = 1e4;
+  var LiveDedupingEventSink = class {
+    constructor(options = {}) {
+      this.seenAt = /* @__PURE__ */ new Map();
+      this.retentionWindowMs = options.retentionWindowMs ?? DEFAULT_RETENTION_WINDOW_MS;
+      this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+      this.now = options.now ?? Date.now;
+    }
+    offer(event) {
+      const now = this.now();
+      this.evictExpired(now);
+      if (this.seenAt.has(event.id)) {
+        return false;
+      }
+      this.seenAt.set(event.id, now);
+      this.evictOverCapacity();
+      return true;
+    }
+    /** Number of event ids currently tracked. Exposed for tests/inspection. */
+    get size() {
+      return this.seenAt.size;
+    }
+    evictExpired(now) {
+      const cutoff = now - this.retentionWindowMs;
+      for (const [id, seenAt] of this.seenAt) {
+        if (seenAt <= cutoff) {
+          this.seenAt.delete(id);
+        } else {
+          break;
+        }
+      }
+    }
+    evictOverCapacity() {
+      while (this.seenAt.size > this.maxEntries) {
+        const oldestId = this.seenAt.keys().next().value;
+        if (oldestId === void 0) break;
+        this.seenAt.delete(oldestId);
+      }
+    }
+  };
+
+  // src/nostr/relay-socket/relay-socket.live.ts
+  function exponentialBackoff(attempt, options) {
+    const base = options?.baseMs ?? 500;
+    const max = options?.maxMs ?? 3e4;
+    return Math.min(max, base * 2 ** attempt);
   }
+  var OPEN_READY_STATE = 1;
+  var LiveRelaySocket = class {
+    constructor(url, options = {}) {
+      this.url = url;
+      this.stateFlow = createStateFlow("Connecting" /* Connecting */);
+      this.messagesFlow = createSharedFlow();
+      this.ws = null;
+      this.attempt = 0;
+      this.reconnectTimer = null;
+      this.closedByCaller = false;
+      this.backoffStrategy = options.backoffStrategy ?? exponentialBackoff;
+      this.webSocketFactory = options.webSocketFactory ?? ((u) => new WebSocket(u));
+      this.openSocket();
+    }
+    get state() {
+      return this.stateFlow.asReadOnly();
+    }
+    get messages() {
+      return this.messagesFlow.asReadOnly();
+    }
+    send(data) {
+      if (this.stateFlow.value !== "Open" /* Open */ || !this.ws) {
+        return err(new Error(`relay ${this.url}: not open`));
+      }
+      if (this.ws.readyState !== OPEN_READY_STATE) {
+        return err(new Error(`relay ${this.url}: socket not ready`));
+      }
+      this.ws.send(data);
+      return ok(void 0);
+    }
+    close() {
+      if (this.closedByCaller) return;
+      this.closedByCaller = true;
+      if (this.reconnectTimer !== null) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.stateFlow.value = "Closed" /* Closed */;
+      this.ws?.close(1e3, "client closing");
+      this.ws = null;
+    }
+    openSocket() {
+      if (this.closedByCaller) return;
+      this.stateFlow.value = this.attempt === 0 ? "Connecting" /* Connecting */ : "Reconnecting" /* Reconnecting */;
+      const socket = this.webSocketFactory(this.url);
+      this.ws = socket;
+      socket.onopen = () => {
+        if (this.ws !== socket) return;
+        this.attempt = 0;
+        this.stateFlow.value = "Open" /* Open */;
+      };
+      socket.onmessage = (ev) => {
+        if (this.ws !== socket) return;
+        this.messagesFlow.emit(ev.data);
+      };
+      socket.onerror = () => {
+      };
+      socket.onclose = () => {
+        if (this.ws !== socket) return;
+        this.ws = null;
+        if (this.closedByCaller) return;
+        this.scheduleReconnect();
+      };
+    }
+    scheduleReconnect() {
+      const delay = this.backoffStrategy(this.attempt);
+      this.attempt += 1;
+      this.stateFlow.value = "Reconnecting" /* Reconnecting */;
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.openSocket();
+      }, delay);
+    }
+  };
+
+  // src/nostr/relay-session/relay-session.live.ts
+  var SUBSCRIPTION_ID = "mesh";
+  var LiveRelaySession = class {
+    constructor(socket, myPubkeyHex, kinds) {
+      this.socket = socket;
+      this.myPubkeyHex = myPubkeyHex;
+      this.kinds = kinds;
+      this.eventsFlow = createSharedFlow();
+      this.unsubscribeSocketState = this.socket.state.subscribe((state) => {
+        if (state === "Open" /* Open */) {
+          this.sendSubscription();
+        }
+      });
+      this.unsubscribeSocketMessages = this.socket.messages.subscribe((raw) => {
+        this.handleMessage(raw);
+      });
+    }
+    get url() {
+      return this.socket.url;
+    }
+    get connectionState() {
+      return this.socket.state;
+    }
+    get events() {
+      return this.eventsFlow.asReadOnly();
+    }
+    publish(event) {
+      return this.socket.send(JSON.stringify(["EVENT", event]));
+    }
+    close() {
+      this.unsubscribeSocketState();
+      this.unsubscribeSocketMessages();
+      this.socket.close();
+    }
+    sendSubscription() {
+      const filter = { "#p": [this.myPubkeyHex] };
+      if (this.kinds) filter.kinds = this.kinds;
+      this.socket.send(JSON.stringify(["REQ", SUBSCRIPTION_ID, filter]));
+    }
+    handleMessage(raw) {
+      const parsed = parseRelayMessage(raw);
+      if (!parsed.ok) return;
+      const [type, ...rest] = parsed.value;
+      if (type === "EVENT" && rest[0] === SUBSCRIPTION_ID) {
+        const event = rest[1];
+        this.eventsFlow.emit(event);
+      }
+    }
+  };
+  function parseRelayMessage(raw) {
+    try {
+      const value = JSON.parse(raw);
+      if (!Array.isArray(value) || value.length === 0 || typeof value[0] !== "string") {
+        return err(new Error("malformed relay frame: not a [type, ...] array"));
+      }
+      return ok(value);
+    } catch (e) {
+      return err(e instanceof Error ? e : new Error(String(e)));
+    }
+  }
+
+  // src/nostr/signalling-client/signalling-client.interface.ts
+  var SIGNALLING_KIND = 25050;
+
+  // src/nostr/signalling-client/signalling-client.live.ts
+  var LiveNostrSignallingClient = class {
+    constructor(signer, relayUrls, options = {}) {
+      this.signer = signer;
+      this.inboundFlow = createSharedFlow();
+      this.unsubscribes = [];
+      this.sink = options.eventSink ?? new LiveDedupingEventSink();
+      const createSession = options.createRelaySession ?? ((url, myPubkeyHex) => {
+        const socket = new LiveRelaySocket(url, options.relaySocketOptions);
+        return new LiveRelaySession(socket, myPubkeyHex, [SIGNALLING_KIND]);
+      });
+      this.sessions = relayUrls.map((url) => createSession(url, this.signer.pubkeyHex));
+      for (const session of this.sessions) {
+        const unsubscribe = session.events.subscribe((event) => this.handleInboundEvent(event));
+        this.unsubscribes.push(unsubscribe);
+      }
+    }
+    get myPubkeyHex() {
+      return this.signer.pubkeyHex;
+    }
+    get inbound() {
+      return this.inboundFlow.asReadOnly();
+    }
+    send(toPubkeyHex, payload) {
+      const convoKey = this.signer.getConvoKey(toPubkeyHex);
+      const ciphertext = this.signer.encryptNip44(payload, convoKey);
+      const event = this.signer.sign(SIGNALLING_KIND, [["p", toPubkeyHex]], ciphertext);
+      let anySucceeded = false;
+      let lastError = new Error("no relays configured");
+      for (const session of this.sessions) {
+        const result = session.publish(event);
+        if (result.ok) {
+          anySucceeded = true;
+        } else {
+          lastError = result.error;
+        }
+      }
+      return anySucceeded ? ok(void 0) : err(lastError);
+    }
+    close() {
+      for (const unsubscribe of this.unsubscribes) unsubscribe();
+      for (const session of this.sessions) session.close();
+    }
+    handleInboundEvent(event) {
+      if (!this.sink.offer(event)) return;
+      let convoKey;
+      try {
+        convoKey = this.signer.getConvoKey(event.pubkey);
+      } catch {
+        return;
+      }
+      let plaintext;
+      try {
+        plaintext = this.signer.decryptNip44(event.content, convoKey);
+      } catch {
+        return;
+      }
+      this.inboundFlow.emit({ fromPubkeyHex: event.pubkey, payload: plaintext });
+    }
+  };
 
   // node_modules/@noble/hashes/utils.js
   function isBytes(a) {
@@ -3684,422 +4297,6 @@ var CoralieCore = (() => {
     }
   }
 
-  // src/crypto/signer/signer.mock.ts
-  var MockSigner = class _MockSigner {
-    constructor(live) {
-      this.live = live;
-    }
-    /** Deterministic identity derived from `seed` (sha256(seed) as the secret key). */
-    static fromSeed(seed) {
-      const secretKey = sha256(new TextEncoder().encode(seed));
-      return new _MockSigner(LiveSigner.fromSecretKey(secretKey));
-    }
-    get pubkeyHex() {
-      return this.live.pubkeyHex;
-    }
-    sign(kind, tags, content, createdAt) {
-      return this.live.sign(kind, tags, content, createdAt);
-    }
-    verify(event) {
-      return this.live.verify(event);
-    }
-    getConvoKey(theirPubkeyHex) {
-      return this.live.getConvoKey(theirPubkeyHex);
-    }
-    encryptNip44(plaintext, convoKey) {
-      return this.live.encryptNip44(plaintext, convoKey);
-    }
-    decryptNip44(payload, convoKey) {
-      return this.live.decryptNip44(payload, convoKey);
-    }
-  };
-  function pubkeyForSeed(seed) {
-    const secretKey = sha256(new TextEncoder().encode(seed));
-    return getPublicKey(secretKey);
-  }
-
-  // src/nostr/event-sink/event-sink.live.ts
-  var DEFAULT_RETENTION_WINDOW_MS = 5 * 60 * 1e3;
-  var DEFAULT_MAX_ENTRIES = 1e4;
-  var LiveDedupingEventSink = class {
-    constructor(options = {}) {
-      this.seenAt = /* @__PURE__ */ new Map();
-      this.retentionWindowMs = options.retentionWindowMs ?? DEFAULT_RETENTION_WINDOW_MS;
-      this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
-      this.now = options.now ?? Date.now;
-    }
-    offer(event) {
-      const now = this.now();
-      this.evictExpired(now);
-      if (this.seenAt.has(event.id)) {
-        return false;
-      }
-      this.seenAt.set(event.id, now);
-      this.evictOverCapacity();
-      return true;
-    }
-    /** Number of event ids currently tracked. Exposed for tests/inspection. */
-    get size() {
-      return this.seenAt.size;
-    }
-    evictExpired(now) {
-      const cutoff = now - this.retentionWindowMs;
-      for (const [id, seenAt] of this.seenAt) {
-        if (seenAt <= cutoff) {
-          this.seenAt.delete(id);
-        } else {
-          break;
-        }
-      }
-    }
-    evictOverCapacity() {
-      while (this.seenAt.size > this.maxEntries) {
-        const oldestId = this.seenAt.keys().next().value;
-        if (oldestId === void 0) break;
-        this.seenAt.delete(oldestId);
-      }
-    }
-  };
-
-  // src/nostr/event-sink/event-sink.mock.ts
-  var MockEventSink = class {
-    constructor() {
-      /** Every event passed to `offer()`, in call order (including duplicates). */
-      this.offered = [];
-      this.seenIds = /* @__PURE__ */ new Set();
-    }
-    offer(event) {
-      this.offered.push(event);
-      if (this.seenIds.has(event.id)) return false;
-      this.seenIds.add(event.id);
-      return true;
-    }
-    /** Test helper: forget an id, so the next offer() of it is accepted again. */
-    forget(eventId) {
-      this.seenIds.delete(eventId);
-    }
-  };
-
-  // src/nostr/relay-socket/relay-socket.interface.ts
-  var RelaySocketState = /* @__PURE__ */ ((RelaySocketState2) => {
-    RelaySocketState2["Connecting"] = "Connecting";
-    RelaySocketState2["Open"] = "Open";
-    RelaySocketState2["Reconnecting"] = "Reconnecting";
-    RelaySocketState2["Closed"] = "Closed";
-    return RelaySocketState2;
-  })(RelaySocketState || {});
-
-  // src/nostr/relay-socket/relay-socket.live.ts
-  function exponentialBackoff(attempt, options) {
-    const base = options?.baseMs ?? 500;
-    const max = options?.maxMs ?? 3e4;
-    return Math.min(max, base * 2 ** attempt);
-  }
-  var OPEN_READY_STATE = 1;
-  var LiveRelaySocket = class {
-    constructor(url, options = {}) {
-      this.url = url;
-      this.stateFlow = createStateFlow("Connecting" /* Connecting */);
-      this.messagesFlow = createSharedFlow();
-      this.ws = null;
-      this.attempt = 0;
-      this.reconnectTimer = null;
-      this.closedByCaller = false;
-      this.backoffStrategy = options.backoffStrategy ?? exponentialBackoff;
-      this.webSocketFactory = options.webSocketFactory ?? ((u) => new WebSocket(u));
-      this.openSocket();
-    }
-    get state() {
-      return this.stateFlow.asReadOnly();
-    }
-    get messages() {
-      return this.messagesFlow.asReadOnly();
-    }
-    send(data) {
-      if (this.stateFlow.value !== "Open" /* Open */ || !this.ws) {
-        return err(new Error(`relay ${this.url}: not open`));
-      }
-      if (this.ws.readyState !== OPEN_READY_STATE) {
-        return err(new Error(`relay ${this.url}: socket not ready`));
-      }
-      this.ws.send(data);
-      return ok(void 0);
-    }
-    close() {
-      if (this.closedByCaller) return;
-      this.closedByCaller = true;
-      if (this.reconnectTimer !== null) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
-      }
-      this.stateFlow.value = "Closed" /* Closed */;
-      this.ws?.close(1e3, "client closing");
-      this.ws = null;
-    }
-    openSocket() {
-      if (this.closedByCaller) return;
-      this.stateFlow.value = this.attempt === 0 ? "Connecting" /* Connecting */ : "Reconnecting" /* Reconnecting */;
-      const socket = this.webSocketFactory(this.url);
-      this.ws = socket;
-      socket.onopen = () => {
-        if (this.ws !== socket) return;
-        this.attempt = 0;
-        this.stateFlow.value = "Open" /* Open */;
-      };
-      socket.onmessage = (ev) => {
-        if (this.ws !== socket) return;
-        this.messagesFlow.emit(ev.data);
-      };
-      socket.onerror = () => {
-      };
-      socket.onclose = () => {
-        if (this.ws !== socket) return;
-        this.ws = null;
-        if (this.closedByCaller) return;
-        this.scheduleReconnect();
-      };
-    }
-    scheduleReconnect() {
-      const delay = this.backoffStrategy(this.attempt);
-      this.attempt += 1;
-      this.stateFlow.value = "Reconnecting" /* Reconnecting */;
-      this.reconnectTimer = setTimeout(() => {
-        this.reconnectTimer = null;
-        this.openSocket();
-      }, delay);
-    }
-  };
-
-  // src/nostr/relay-socket/relay-socket.mock.ts
-  var MockRelaySocket = class {
-    constructor(url = "wss://relay.example") {
-      this.url = url;
-      this.stateFlow = createStateFlow("Connecting" /* Connecting */);
-      this.messagesFlow = createSharedFlow();
-      /** Every frame handed to `send()`, in order. */
-      this.sent = [];
-      this.closed = false;
-      this.sendResult = ok(void 0);
-    }
-    get state() {
-      return this.stateFlow.asReadOnly();
-    }
-    get messages() {
-      return this.messagesFlow.asReadOnly();
-    }
-    send(data) {
-      this.sent.push(data);
-      return this.sendResult;
-    }
-    close() {
-      this.closed = true;
-      this.stateFlow.value = "Closed" /* Closed */;
-    }
-    // --- test-only driver methods ---
-    open() {
-      this.stateFlow.value = "Open" /* Open */;
-    }
-    reconnecting() {
-      this.stateFlow.value = "Reconnecting" /* Reconnecting */;
-    }
-    /** Configures every subsequent `send()` to report failure. */
-    failSends(error = new Error("mock relay rejected send")) {
-      this.sendResult = { ok: false, error };
-    }
-    /** Simulates an inbound raw text frame from the relay. */
-    deliver(raw) {
-      this.messagesFlow.emit(raw);
-    }
-  };
-
-  // src/nostr/relay-session/relay-session.live.ts
-  var SUBSCRIPTION_ID = "mesh";
-  var LiveRelaySession = class {
-    constructor(socket, myPubkeyHex, kinds) {
-      this.socket = socket;
-      this.myPubkeyHex = myPubkeyHex;
-      this.kinds = kinds;
-      this.eventsFlow = createSharedFlow();
-      this.unsubscribeSocketState = this.socket.state.subscribe((state) => {
-        if (state === "Open" /* Open */) {
-          this.sendSubscription();
-        }
-      });
-      this.unsubscribeSocketMessages = this.socket.messages.subscribe((raw) => {
-        this.handleMessage(raw);
-      });
-    }
-    get url() {
-      return this.socket.url;
-    }
-    get connectionState() {
-      return this.socket.state;
-    }
-    get events() {
-      return this.eventsFlow.asReadOnly();
-    }
-    publish(event) {
-      return this.socket.send(JSON.stringify(["EVENT", event]));
-    }
-    close() {
-      this.unsubscribeSocketState();
-      this.unsubscribeSocketMessages();
-      this.socket.close();
-    }
-    sendSubscription() {
-      const filter = { "#p": [this.myPubkeyHex] };
-      if (this.kinds) filter.kinds = this.kinds;
-      this.socket.send(JSON.stringify(["REQ", SUBSCRIPTION_ID, filter]));
-    }
-    handleMessage(raw) {
-      const parsed = parseRelayMessage(raw);
-      if (!parsed.ok) return;
-      const [type, ...rest] = parsed.value;
-      if (type === "EVENT" && rest[0] === SUBSCRIPTION_ID) {
-        const event = rest[1];
-        this.eventsFlow.emit(event);
-      }
-    }
-  };
-  function parseRelayMessage(raw) {
-    try {
-      const value = JSON.parse(raw);
-      if (!Array.isArray(value) || value.length === 0 || typeof value[0] !== "string") {
-        return err(new Error("malformed relay frame: not a [type, ...] array"));
-      }
-      return ok(value);
-    } catch (e) {
-      return err(e instanceof Error ? e : new Error(String(e)));
-    }
-  }
-
-  // src/nostr/relay-session/relay-session.mock.ts
-  var MockRelaySession = class {
-    constructor(url = "wss://relay.example") {
-      this.url = url;
-      this.stateFlow = createStateFlow("Open" /* Open */);
-      this.eventsFlow = createSharedFlow();
-      /** Every event handed to `publish()`, in order. */
-      this.published = [];
-      this.publishResult = ok(void 0);
-    }
-    get connectionState() {
-      return this.stateFlow.asReadOnly();
-    }
-    get events() {
-      return this.eventsFlow.asReadOnly();
-    }
-    publish(event) {
-      this.published.push(event);
-      return this.publishResult;
-    }
-    close() {
-      this.stateFlow.value = "Closed" /* Closed */;
-    }
-    // --- test-only driver methods ---
-    /** Configures every subsequent `publish()` to report failure. */
-    failPublishes(error = new Error("mock relay rejected publish")) {
-      this.publishResult = { ok: false, error };
-    }
-    /** Simulates an inbound event delivered by this relay. */
-    deliver(event) {
-      this.eventsFlow.emit(event);
-    }
-  };
-
-  // src/nostr/signalling-client/signalling-client.interface.ts
-  var SIGNALLING_KIND = 25050;
-
-  // src/nostr/signalling-client/signalling-client.live.ts
-  var LiveNostrSignallingClient = class {
-    constructor(signer, relayUrls, options = {}) {
-      this.signer = signer;
-      this.inboundFlow = createSharedFlow();
-      this.unsubscribes = [];
-      this.sink = options.eventSink ?? new LiveDedupingEventSink();
-      const createSession = options.createRelaySession ?? ((url, myPubkeyHex) => {
-        const socket = new LiveRelaySocket(url, options.relaySocketOptions);
-        return new LiveRelaySession(socket, myPubkeyHex, [SIGNALLING_KIND]);
-      });
-      this.sessions = relayUrls.map((url) => createSession(url, this.signer.pubkeyHex));
-      for (const session of this.sessions) {
-        const unsubscribe = session.events.subscribe((event) => this.handleInboundEvent(event));
-        this.unsubscribes.push(unsubscribe);
-      }
-    }
-    get myPubkeyHex() {
-      return this.signer.pubkeyHex;
-    }
-    get inbound() {
-      return this.inboundFlow.asReadOnly();
-    }
-    send(toPubkeyHex, payload) {
-      const convoKey = this.signer.getConvoKey(toPubkeyHex);
-      const ciphertext = this.signer.encryptNip44(payload, convoKey);
-      const event = this.signer.sign(SIGNALLING_KIND, [["p", toPubkeyHex]], ciphertext);
-      let anySucceeded = false;
-      let lastError = new Error("no relays configured");
-      for (const session of this.sessions) {
-        const result = session.publish(event);
-        if (result.ok) {
-          anySucceeded = true;
-        } else {
-          lastError = result.error;
-        }
-      }
-      return anySucceeded ? ok(void 0) : err(lastError);
-    }
-    close() {
-      for (const unsubscribe of this.unsubscribes) unsubscribe();
-      for (const session of this.sessions) session.close();
-    }
-    handleInboundEvent(event) {
-      if (!this.sink.offer(event)) return;
-      let convoKey;
-      try {
-        convoKey = this.signer.getConvoKey(event.pubkey);
-      } catch {
-        return;
-      }
-      let plaintext;
-      try {
-        plaintext = this.signer.decryptNip44(event.content, convoKey);
-      } catch {
-        return;
-      }
-      this.inboundFlow.emit({ fromPubkeyHex: event.pubkey, payload: plaintext });
-    }
-  };
-
-  // src/nostr/signalling-client/signalling-client.mock.ts
-  var MockSignallingClient = class {
-    constructor(myPubkeyHex) {
-      this.myPubkeyHex = myPubkeyHex;
-      this.inboundFlow = createSharedFlow();
-      /** Every `send()` call, in order. */
-      this.sent = [];
-      this.sendResult = ok(void 0);
-    }
-    get inbound() {
-      return this.inboundFlow.asReadOnly();
-    }
-    send(toPubkeyHex, payload) {
-      this.sent.push({ toPubkeyHex, payload });
-      return this.sendResult;
-    }
-    close() {
-    }
-    // --- test-only driver methods ---
-    /** Configures every subsequent `send()` to report failure. */
-    failSends(error = new Error("mock signalling client rejected send")) {
-      this.sendResult = { ok: false, error };
-    }
-    /** Simulates a decrypted inbound message arriving from `fromPubkeyHex`. */
-    deliver(fromPubkeyHex, payload) {
-      this.inboundFlow.emit({ fromPubkeyHex, payload });
-    }
-  };
-
   // src/webrtc/peer-connection/peer-connection.live.ts
   var LiveDataChannel = class {
     constructor(channel) {
@@ -4180,339 +4377,30 @@ var CoralieCore = (() => {
       });
     }
   };
-  function createLivePeerConnectionFactory(options = {}) {
-    return () => new LivePeerConnection(new RTCPeerConnection({ iceServers: options.iceServers }));
+
+  // src/mesh-endpoints.ts
+  var DEFAULT_MESH_ENDPOINTS = {
+    relayUrls: ["wss://relay.damus.io", "wss://nos.lol", "wss://nostr.oxtr.dev", "wss://purplerelay.com"],
+    iceServers: [
+      { urls: ["stun:stun.l.google.com:19302"] },
+      { urls: ["stun:stun1.l.google.com:19302"] },
+      { urls: ["stun:stun2.l.google.com:19302"] },
+      { urls: ["stun:stun3.l.google.com:19302"] },
+      { urls: ["stun:stun4.l.google.com:19302"] },
+      { urls: ["stun:stun.cloudflare.com:3478"] }
+    ]
+  };
+
+  // src/create-live-connection-manager.ts
+  function createLiveConnectionManager(options = {}) {
+    const relayUrls = options.relayUrls ?? DEFAULT_MESH_ENDPOINTS.relayUrls;
+    const iceServers = options.iceServers ?? DEFAULT_MESH_ENDPOINTS.iceServers;
+    const signer = LiveSigner.generate();
+    const signalingClient = new LiveNostrSignallingClient(signer, relayUrls);
+    const peerConnectionFactory = () => new LivePeerConnection(new RTCPeerConnection({ iceServers }));
+    const manager = new LiveConnectionManager(signalingClient, peerConnectionFactory);
+    return manager;
   }
-
-  // src/webrtc/peer-connection/peer-connection.mock.ts
-  var MockDataChannel = class {
-    constructor(label) {
-      this.label = label;
-      this.readyState = "connecting";
-      this.onopen = null;
-      this.onclose = null;
-      this.onmessage = null;
-      this.peer = null;
-      this.sent = [];
-    }
-    open() {
-      this.readyState = "open";
-      this.onopen?.();
-    }
-    send(data) {
-      this.sent.push(data);
-      this.peer?.onmessage?.({ data });
-    }
-    close() {
-      this.readyState = "closed";
-      this.onclose?.();
-    }
-  };
-  var MockPeerConnection = class {
-    constructor() {
-      this.connectionState = "new";
-      this.onconnectionstatechange = null;
-      this.ondatachannel = null;
-      this.dataChannel = null;
-      this.remote = null;
-    }
-    createDataChannel(label) {
-      const channel = new MockDataChannel(label);
-      this.dataChannel = channel;
-      return channel;
-    }
-    async createOffer() {
-      return { type: "offer", sdp: "mock-offer-sdp" };
-    }
-    async createAnswer() {
-      return { type: "answer", sdp: "mock-answer-sdp" };
-    }
-    async setRemoteDescription(desc) {
-      if (desc.type === "offer") {
-        const remoteChannel = this.remote?.dataChannel;
-        if (remoteChannel) {
-          const localChannel = new MockDataChannel(remoteChannel.label);
-          localChannel.peer = remoteChannel;
-          remoteChannel.peer = localChannel;
-          this.dataChannel = localChannel;
-          this.ondatachannel?.({ channel: localChannel });
-        }
-      } else {
-        this.markConnected();
-        this.remote?.markConnected();
-        this.dataChannel?.open();
-        this.remote?.dataChannel?.open();
-      }
-    }
-    close() {
-      this.connectionState = "closed";
-      this.onconnectionstatechange?.();
-    }
-    markConnected() {
-      this.connectionState = "connected";
-      this.onconnectionstatechange?.();
-    }
-    simulateFailure() {
-      this.connectionState = "failed";
-      this.onconnectionstatechange?.();
-    }
-  };
-  function createLinkedMockPeerConnections() {
-    const a = new MockPeerConnection();
-    const b = new MockPeerConnection();
-    a.remote = b;
-    b.remote = a;
-    return [a, b];
-  }
-
-  // src/webrtc/peer-link/peer-link.live.ts
-  var LivePeerLink = class {
-    constructor(channel) {
-      this.channel = channel;
-      this.stateFlow = createStateFlow("open");
-      this.incomingBytesFlow = createSharedFlow();
-      this.channel.onmessage = (ev) => {
-        this.incomingBytesFlow.emit(ev.data);
-      };
-      this.channel.onclose = () => {
-        this.stateFlow.value = "closed";
-      };
-    }
-    get state() {
-      return this.stateFlow.asReadOnly();
-    }
-    get incomingBytes() {
-      return this.incomingBytesFlow.asReadOnly();
-    }
-    send(data) {
-      if (this.stateFlow.value !== "open") {
-        throw new Error("cannot send on a closed PeerLink");
-      }
-      this.channel.send(data);
-    }
-    close() {
-      if (this.stateFlow.value === "closed") return;
-      this.stateFlow.value = "closed";
-      this.channel.close();
-    }
-  };
-
-  // src/webrtc/peer-link/peer-link.mock.ts
-  var MockPeerLink = class {
-    constructor() {
-      this.stateFlow = createStateFlow("open");
-      this.incomingBytesFlow = createSharedFlow();
-      /** Every payload handed to `send()`, in order. */
-      this.sent = [];
-    }
-    get state() {
-      return this.stateFlow.asReadOnly();
-    }
-    get incomingBytes() {
-      return this.incomingBytesFlow.asReadOnly();
-    }
-    send(data) {
-      if (this.stateFlow.value !== "open") {
-        throw new Error("cannot send on a closed PeerLink");
-      }
-      this.sent.push(data);
-    }
-    close() {
-      this.stateFlow.value = "closed";
-    }
-    // --- test-only driver methods ---
-    /** Simulates bytes arriving from the remote peer. */
-    simulateIncoming(data) {
-      this.incomingBytesFlow.emit(data);
-    }
-  };
-
-  // src/webrtc/initiator/initiator.live.ts
-  var DEFAULT_HANDSHAKE_TIMEOUT_MS = 3e4;
-  var DATA_CHANNEL_LABEL = "mesh";
-  var LiveInitiator = class {
-    constructor(options) {
-      this.stateFlow = createStateFlow("Initiating" /* Initiating */);
-      this.timeoutHandle = null;
-      this.link = null;
-      this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
-      this.pc = options.peerConnectionFactory();
-      this.pc.onconnectionstatechange = () => this.handleConnectionStateChange();
-    }
-    get state() {
-      return this.stateFlow.asReadOnly();
-    }
-    get peerLink() {
-      return this.link;
-    }
-    async createOffer() {
-      const channel = this.pc.createDataChannel(DATA_CHANNEL_LABEL);
-      this.wireDataChannel(channel);
-      this.stateFlow.value = "Offering" /* Offering */;
-      const offer = await this.pc.createOffer();
-      this.stateFlow.value = "Connecting" /* Connecting */;
-      this.startHandshakeTimeout();
-      return offer;
-    }
-    async acceptAnswer(answer) {
-      if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
-      await this.pc.setRemoteDescription(answer);
-    }
-    close() {
-      this.clearHandshakeTimeout();
-      this.link?.close();
-      this.pc.close();
-      this.stateFlow.value = "Closed" /* Closed */;
-    }
-    wireDataChannel(channel) {
-      channel.onopen = () => {
-        if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
-        this.link = new LivePeerLink(channel);
-        this.clearHandshakeTimeout();
-        this.stateFlow.value = "Connected" /* Connected */;
-      };
-    }
-    handleConnectionStateChange() {
-      if (this.pc.connectionState === "failed") this.fail();
-    }
-    fail() {
-      if (this.stateFlow.value === "Failed" /* Failed */ || this.stateFlow.value === "Closed" /* Closed */) return;
-      this.clearHandshakeTimeout();
-      this.stateFlow.value = "Failed" /* Failed */;
-    }
-    startHandshakeTimeout() {
-      this.timeoutHandle = setTimeout(() => {
-        this.timeoutHandle = null;
-        if (this.stateFlow.value !== "Connected" /* Connected */) this.fail();
-      }, this.handshakeTimeoutMs);
-    }
-    clearHandshakeTimeout() {
-      if (this.timeoutHandle !== null) {
-        clearTimeout(this.timeoutHandle);
-        this.timeoutHandle = null;
-      }
-    }
-  };
-
-  // src/webrtc/initiator/initiator.mock.ts
-  var MockInitiator = class {
-    constructor() {
-      this.stateFlow = createStateFlow("Initiating" /* Initiating */);
-      this.link = null;
-      /** Every offer returned by `createOffer()`, in order. */
-      this.offersCreated = [];
-      /** Every answer passed to `acceptAnswer()`, in order. */
-      this.answersAccepted = [];
-    }
-    get state() {
-      return this.stateFlow.asReadOnly();
-    }
-    get peerLink() {
-      return this.link;
-    }
-    async createOffer() {
-      this.stateFlow.value = "Offering" /* Offering */;
-      const offer = { type: "offer", sdp: "mock-offer-sdp" };
-      this.offersCreated.push(offer);
-      this.stateFlow.value = "Connecting" /* Connecting */;
-      return offer;
-    }
-    async acceptAnswer(answer) {
-      if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
-      this.answersAccepted.push(answer);
-    }
-    close() {
-      this.link?.close();
-      this.stateFlow.value = "Closed" /* Closed */;
-    }
-    // --- test-only driver methods ---
-    /** Forces the state machine to Connected, attaching the given PeerLink. */
-    simulateConnected(link) {
-      this.link = link;
-      this.stateFlow.value = "Connected" /* Connected */;
-    }
-    /** Forces the state machine to Failed (connection failure or handshake timeout). */
-    simulateFailed() {
-      if (this.stateFlow.value === "Closed" /* Closed */) return;
-      this.stateFlow.value = "Failed" /* Failed */;
-    }
-  };
-
-  // src/webrtc/answerer/answerer.live.ts
-  var LiveAnswerer = class {
-    constructor(options) {
-      this.stateFlow = createStateFlow("Answering" /* Answering */);
-      this.link = null;
-      this.pc = options.peerConnectionFactory();
-      this.pc.onconnectionstatechange = () => this.handleConnectionStateChange();
-      this.pc.ondatachannel = (ev) => this.wireDataChannel(ev.channel);
-    }
-    get state() {
-      return this.stateFlow.asReadOnly();
-    }
-    get peerLink() {
-      return this.link;
-    }
-    async createAnswer(offer) {
-      await this.pc.setRemoteDescription(offer);
-      const answer = await this.pc.createAnswer();
-      this.stateFlow.value = "Connecting" /* Connecting */;
-      return answer;
-    }
-    close() {
-      this.link?.close();
-      this.pc.close();
-      this.stateFlow.value = "Closed" /* Closed */;
-    }
-    wireDataChannel(channel) {
-      channel.onopen = () => {
-        if (this.stateFlow.value !== "Connecting" /* Connecting */) return;
-        this.link = new LivePeerLink(channel);
-        this.stateFlow.value = "Connected" /* Connected */;
-      };
-    }
-    handleConnectionStateChange() {
-      if (this.pc.connectionState !== "failed") return;
-      if (this.stateFlow.value === "Failed" /* Failed */ || this.stateFlow.value === "Closed" /* Closed */) return;
-      this.stateFlow.value = "Failed" /* Failed */;
-    }
-  };
-
-  // src/webrtc/answerer/answerer.mock.ts
-  var MockAnswerer = class {
-    constructor() {
-      this.stateFlow = createStateFlow("Answering" /* Answering */);
-      this.link = null;
-      /** Every offer passed to `createAnswer()`, in order. */
-      this.offersReceived = [];
-    }
-    get state() {
-      return this.stateFlow.asReadOnly();
-    }
-    get peerLink() {
-      return this.link;
-    }
-    async createAnswer(offer) {
-      this.offersReceived.push(offer);
-      this.stateFlow.value = "Connecting" /* Connecting */;
-      return { type: "answer", sdp: "mock-answer-sdp" };
-    }
-    close() {
-      this.link?.close();
-      this.stateFlow.value = "Closed" /* Closed */;
-    }
-    // --- test-only driver methods ---
-    /** Forces the state machine to Connected, attaching the given PeerLink. */
-    simulateConnected(link) {
-      this.link = link;
-      this.stateFlow.value = "Connected" /* Connected */;
-    }
-    /** Forces the state machine to Failed. */
-    simulateFailed() {
-      if (this.stateFlow.value === "Closed" /* Closed */) return;
-      this.stateFlow.value = "Failed" /* Failed */;
-    }
-  };
   return __toCommonJS(index_exports);
 })();
 /*! Bundled license information:
