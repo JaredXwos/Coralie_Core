@@ -29,6 +29,7 @@ var CoralieInternal = (() => {
     LiveConnectionManager: () => LiveConnectionManager,
     LiveInitiator: () => LiveInitiator,
     LiveNostrSignallingClient: () => LiveNostrSignallingClient,
+    LiveRelaySession: () => LiveRelaySession,
     LiveRelaySocket: () => LiveRelaySocket,
     LiveSigner: () => LiveSigner,
     RelaySocketState: () => RelaySocketState,
@@ -2296,6 +2297,17 @@ var CoralieInternal = (() => {
   })();
 
   // node_modules/nostr-tools/lib/esm/pure.js
+  var utf8Decoder = new TextDecoder("utf-8");
+  var utf8Encoder = new TextEncoder();
+  function isHex32(input) {
+    for (let i2 = 0; i2 < 64; i2++) {
+      let cc = input.charCodeAt(i2);
+      if (isNaN(cc) || cc < 48 || cc > 102 || cc > 57 && cc < 97) {
+        return false;
+      }
+    }
+    return true;
+  }
   var verifiedSymbol = /* @__PURE__ */ Symbol("verified");
   var isRecord = (obj) => obj instanceof Object;
   function validateEvent(event) {
@@ -2309,7 +2321,7 @@ var CoralieInternal = (() => {
       return false;
     if (typeof event.pubkey !== "string")
       return false;
-    if (!event.pubkey.match(/^[a-f0-9]{64}$/))
+    if (!isHex32(event.pubkey))
       return false;
     if (!Array.isArray(event.tags))
       return false;
@@ -2324,8 +2336,6 @@ var CoralieInternal = (() => {
     }
     return true;
   }
-  var utf8Decoder = new TextDecoder("utf-8");
-  var utf8Encoder = new TextEncoder();
   var JS = class {
     generateSecretKey() {
       return schnorr.utils.randomSecretKey();
@@ -3670,52 +3680,6 @@ var CoralieInternal = (() => {
     }
   };
 
-  // src/nostr/signalling-client/signalling-client.interface.ts
-  var SIGNALLING_KIND = 25050;
-
-  // src/nostr/event-sink/event-sink.live.ts
-  var DEFAULT_RETENTION_WINDOW_MS = 5 * 60 * 1e3;
-  var DEFAULT_MAX_ENTRIES = 1e4;
-  var LiveDedupingEventSink = class {
-    constructor(options = {}) {
-      this.seenAt = /* @__PURE__ */ new Map();
-      this.retentionWindowMs = options.retentionWindowMs ?? DEFAULT_RETENTION_WINDOW_MS;
-      this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
-      this.now = options.now ?? Date.now;
-    }
-    offer(event) {
-      const now = this.now();
-      this.evictExpired(now);
-      if (this.seenAt.has(event.id)) {
-        return false;
-      }
-      this.seenAt.set(event.id, now);
-      this.evictOverCapacity();
-      return true;
-    }
-    /** Number of event ids currently tracked. Exposed for tests/inspection. */
-    get size() {
-      return this.seenAt.size;
-    }
-    evictExpired(now) {
-      const cutoff = now - this.retentionWindowMs;
-      for (const [id, seenAt] of this.seenAt) {
-        if (seenAt <= cutoff) {
-          this.seenAt.delete(id);
-        } else {
-          break;
-        }
-      }
-    }
-    evictOverCapacity() {
-      while (this.seenAt.size > this.maxEntries) {
-        const oldestId = this.seenAt.keys().next().value;
-        if (oldestId === void 0) break;
-        this.seenAt.delete(oldestId);
-      }
-    }
-  };
-
   // src/nostr/relay-session/relay-session.live.ts
   var SUBSCRIPTION_ID = "mesh";
   var LiveRelaySession = class {
@@ -3776,6 +3740,52 @@ var CoralieInternal = (() => {
       return err(e instanceof Error ? e : new Error(String(e)));
     }
   }
+
+  // src/nostr/signalling-client/signalling-client.interface.ts
+  var SIGNALLING_KIND = 25050;
+
+  // src/nostr/event-sink/event-sink.live.ts
+  var DEFAULT_RETENTION_WINDOW_MS = 5 * 60 * 1e3;
+  var DEFAULT_MAX_ENTRIES = 1e4;
+  var LiveDedupingEventSink = class {
+    constructor(options = {}) {
+      this.seenAt = /* @__PURE__ */ new Map();
+      this.retentionWindowMs = options.retentionWindowMs ?? DEFAULT_RETENTION_WINDOW_MS;
+      this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+      this.now = options.now ?? Date.now;
+    }
+    offer(event) {
+      const now = this.now();
+      this.evictExpired(now);
+      if (this.seenAt.has(event.id)) {
+        return false;
+      }
+      this.seenAt.set(event.id, now);
+      this.evictOverCapacity();
+      return true;
+    }
+    /** Number of event ids currently tracked. Exposed for tests/inspection. */
+    get size() {
+      return this.seenAt.size;
+    }
+    evictExpired(now) {
+      const cutoff = now - this.retentionWindowMs;
+      for (const [id, seenAt] of this.seenAt) {
+        if (seenAt <= cutoff) {
+          this.seenAt.delete(id);
+        } else {
+          break;
+        }
+      }
+    }
+    evictOverCapacity() {
+      while (this.seenAt.size > this.maxEntries) {
+        const oldestId = this.seenAt.keys().next().value;
+        if (oldestId === void 0) break;
+        this.seenAt.delete(oldestId);
+      }
+    }
+  };
 
   // src/nostr/signalling-client/signalling-client.live.ts
   var LiveNostrSignallingClient = class {

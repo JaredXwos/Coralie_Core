@@ -20,6 +20,7 @@ export { LiveSigner } from './crypto/signer'
 
 // Nostr / signalling
 export { LiveRelaySocket, RelaySocketState } from './nostr/relay-socket'
+export { LiveRelaySession } from './nostr/relay-session'
 export { LiveNostrSignallingClient } from './nostr/signalling-client'
 export type { SignallingClient } from './nostr/signalling-client'
 

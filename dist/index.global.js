@@ -3083,6 +3083,17 @@ var CoralieCore = (() => {
   })();
 
   // node_modules/nostr-tools/lib/esm/pure.js
+  var utf8Decoder = new TextDecoder("utf-8");
+  var utf8Encoder = new TextEncoder();
+  function isHex32(input) {
+    for (let i2 = 0; i2 < 64; i2++) {
+      let cc = input.charCodeAt(i2);
+      if (isNaN(cc) || cc < 48 || cc > 102 || cc > 57 && cc < 97) {
+        return false;
+      }
+    }
+    return true;
+  }
   var verifiedSymbol = /* @__PURE__ */ Symbol("verified");
   var isRecord = (obj) => obj instanceof Object;
   function validateEvent(event) {
@@ -3096,7 +3107,7 @@ var CoralieCore = (() => {
       return false;
     if (typeof event.pubkey !== "string")
       return false;
-    if (!event.pubkey.match(/^[a-f0-9]{64}$/))
+    if (!isHex32(event.pubkey))
       return false;
     if (!Array.isArray(event.tags))
       return false;
@@ -3111,8 +3122,6 @@ var CoralieCore = (() => {
     }
     return true;
   }
-  var utf8Decoder = new TextDecoder("utf-8");
-  var utf8Encoder = new TextEncoder();
   var JS = class {
     generateSecretKey() {
       return schnorr.utils.randomSecretKey();

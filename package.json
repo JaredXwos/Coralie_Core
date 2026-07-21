@@ -20,7 +20,9 @@
     "test:watch": "vitest watch",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
-    "build": "tsup"
+    "build": "tsup",
+    "test:integration": "playwright test src/integration.spec.ts --headed",
+    "test:integration:headless": "playwright test src/integration.spec.ts"
   },
   "keywords": [
     "nostr",
