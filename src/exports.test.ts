@@ -1,44 +1,51 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
+
+import type {
+  CoralieHost,
+  TerminalFailure,
+  TerminalFailureEventDetail,
+} from './index'
 
 /**
- * Build-output test: verifies the published entry point exports only
- * the documented public surface (Phase 5 requirement).
+ * Build-output test: verifies that the published root entry point exposes the
+ * documented Coralie v2 and connection-manager runtime surface without
+ * leaking implementation modules.
  *
- * This test imports from the built output to ensure no internal modules
- * are accidentally leaked through stray re-exports.
- *
- * Expected exports:
- * - createLiveConnectionManager (factory function)
- * - CreateLiveConnectionManagerOptions (configuration interface)
- * - LiveConnectionManager (orchestrator interface)
- * - MeshPeer (lightweight peer metadata)
- * - PeerMessage (application-level message type)
- * - TerminalFailure (retry exhaustion event)
- * - LinkState (connection lifecycle enum)
- * - StateFlow<T> (read-only hot observable)
- * - SharedFlow<T> (hot broadcast observable)
+ * Type-only exports are checked by the imports above. A missing type export
+ * causes TypeScript or the DTS build to fail before these tests run.
  */
 describe('exports (build-output test)', () => {
-  it('should export createLiveConnectionManager function', async () => {
+  it('should export the connection-manager factory', async () => {
     const mod = await import('../dist/index.js')
     expect(typeof mod.createLiveConnectionManager).toBe('function')
   })
 
-  it('should export LinkState enum (only runtime-visible export besides factory)', async () => {
+  it('should export the Coralie browser host runtime', async () => {
     const mod = await import('../dist/index.js')
+
+    expect(typeof mod.BrowserCoralieHost).toBe('function')
+    expect(typeof mod.installBrowserCoralie).toBe('function')
+    expect(mod.MAX_HTTP_RESPONSE_BYTES).toBe(64 * 1024 * 1024)
+  })
+
+  it('should export the LinkState enum', async () => {
+    const mod = await import('../dist/index.js')
+
     expect(mod.LinkState).toBeDefined()
     expect(typeof mod.LinkState.Connected).toBe('string')
     expect(mod.LinkState.Offering).toBe('Offering')
   })
 
-  it('should not export internal Signer module', async () => {
+  it('should not export internal Signer modules', async () => {
     const mod = await import('../dist/index.js')
+
     expect(mod.LiveSigner).toBeUndefined()
     expect(mod.MockSigner).toBeUndefined()
   })
 
   it('should not export internal Nostr modules', async () => {
     const mod = await import('../dist/index.js')
+
     expect(mod.LiveRelaySocket).toBeUndefined()
     expect(mod.MockRelaySocket).toBeUndefined()
     expect(mod.LiveRelaySession).toBeUndefined()
@@ -51,6 +58,7 @@ describe('exports (build-output test)', () => {
 
   it('should not export internal WebRTC modules', async () => {
     const mod = await import('../dist/index.js')
+
     expect(mod.LivePeerConnection).toBeUndefined()
     expect(mod.MockPeerConnection).toBeUndefined()
     expect(mod.LiveInitiator).toBeUndefined()
@@ -61,46 +69,51 @@ describe('exports (build-output test)', () => {
     expect(mod.MockPeerLink).toBeUndefined()
   })
 
-  it('should not export internal core flow modules', async () => {
+  it('should not export mutable core-flow implementations', async () => {
     const mod = await import('../dist/index.js')
+
     expect(mod.createStateFlow).toBeUndefined()
     expect(mod.createSharedFlow).toBeUndefined()
   })
 
-  it('should not export connection manager implementation', async () => {
+  it('should not export the connection-manager implementation class', async () => {
     const mod = await import('../dist/index.js')
-    // Only interface should be exported, not the impl class
-    expect(mod.LiveConnectionManager).toBeUndefined() // The class/impl
+
+    // LiveConnectionManager is a TypeScript interface and must not become a
+    // runtime implementation export.
+    expect(mod.LiveConnectionManager).toBeUndefined()
   })
 
   it('should list exactly the runtime-visible exports', async () => {
     const mod = await import('../dist/index.js')
     const exportedKeys = Object.keys(mod).sort()
 
-    // Only LinkState (enum) and createLiveConnectionManager (function) are
-    // visible at runtime; TypeScript interfaces/types are erased during compilation.
-    // The .d.ts file declares all types for static type checking.
     const expectedExports = [
+      'BrowserCoralieHost',
       'LinkState',
+      'MAX_HTTP_RESPONSE_BYTES',
       'createLiveConnectionManager',
+      'installBrowserCoralie',
     ].sort()
 
     expect(exportedKeys).toEqual(expectedExports)
   })
 
-  it('should declare all types in .d.ts for static checking', async () => {
-    // This is a compile-time check: if the .d.ts was successfully generated,
-    // the TypeScript compiler confirmed that all these types are exported.
-    // The dist/index.d.ts file contains:
-    // - CreateLiveConnectionManagerOptions
-    // - LiveConnectionManager
-    // - MeshPeer
-    // - PeerMessage
-    // - TerminalFailure
-    // - LinkState
-    // - StateFlow<T>
-    // - SharedFlow<T>
-    // - createLiveConnectionManager
-    expect(true).toBe(true) // Compile-time check passed if we got here
+  it('should expose compatible terminal-failure event type names', () => {
+    const failure: TerminalFailure = {
+      pubkeyHex: 'a'.repeat(64),
+      attemptCount: 5,
+      reason: 'retry limit reached',
+    }
+
+    const eventDetail: TerminalFailureEventDetail = failure
+    expect(eventDetail.attemptCount).toBe(5)
+  })
+
+  it('should expose the CoralieHost interface to consumers', () => {
+    // The assignment is intentionally compile-time focused. If CoralieHost is
+    // missing from the root declaration output, this test file cannot compile.
+    const host: CoralieHost | null = null
+    expect(host).toBeNull()
   })
 })

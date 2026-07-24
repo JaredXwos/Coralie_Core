@@ -17,6 +17,24 @@ export interface DataChannelLike {
 export type PeerConnectionState = 'new' | 'connecting' | 'connected' | 'disconnected' | 'failed' | 'closed'
 
 /**
+ * Optional diagnostic hooks for observing the internal WebRTC lifecycle.
+ * All handlers are optional; unset ones are simply not called. This exists
+ * purely for logging/telemetry and does not affect connection behavior.
+ *
+ * `iceCandidate` reports each gathered local candidate string (or null at
+ * end-of-gathering). `iceConnectionState` and `iceGatheringState` mirror the
+ * underlying RTCPeerConnection states, which the non-trickle contract
+ * otherwise hides from callers.
+ */
+export interface PeerConnectionObserver {
+  connectionState?: (state: PeerConnectionState) => void
+  iceConnectionState?: (state: RTCIceConnectionState) => void
+  iceGatheringState?: (state: RTCIceGatheringState) => void
+  iceCandidate?: (candidate: string | null) => void
+  signalingState?: (state: RTCSignalingState) => void
+}
+
+/**
  * Minimal subset of `RTCPeerConnection` this module depends on.
  *
  * Deliberately non-trickle: `createOffer()`/`createAnswer()` are
@@ -39,4 +57,4 @@ export interface PeerConnectionLike {
   close(): void
 }
 
-export type PeerConnectionFactory = () => PeerConnectionLike
+export type PeerConnectionFactory = (observer?: PeerConnectionObserver) => PeerConnectionLike

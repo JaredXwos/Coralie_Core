@@ -1,6 +1,6 @@
 import type { SharedFlow } from '../core/shared-flow'
 import type { StateFlow } from '../core/state-flow'
-import type { DataChannelFrame, PeerMessage, TerminalFailure } from '../core/types'
+import type { PeerMessage, TerminalFailure } from '../core/types'
 
 /**
  * Lightweight peer metadata exposed to the application.
@@ -24,7 +24,7 @@ export interface MeshPeer {
  * - §2 rule 2: Always open to answering, gated by empty `initiating`
  * - §2 rule 3: Inbound answer matched only to in-flight initiation
  * - §2 rule 4: Failure → retry up to 5 times, then terminal failure
- * - §2 rule 5: Connection open → add to `connected`, broadcast `Announce`
+ * - §2 rule 5: Connection open → add to `connected`, broadcast `announce`
  * - §2 rule 6: Connection close → remove from `connected`, no broadcast
  */
 export interface LiveConnectionManager {
@@ -59,7 +59,7 @@ export interface LiveConnectionManager {
    * If the peer is in `connected`, sends the payload over the data channel.
    * If not connected: dropped silently (no queue, no return of failure).
    */
-  sendToPeer(toPubkeyHex: string, payload: unknown): void
+  sendToPeer(toPubkeyHex: string, payload: Uint8Array): void
 
   /**
    * Close all connections and clean up resources.

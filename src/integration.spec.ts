@@ -240,34 +240,48 @@ test.describe('Integration: Relay message filtering', () => {
 
         const session = new LiveRelaySession(socket, signer.pubkeyHex)
 
-        // Create and sign a test event with #p tag pointing to us
+        // Create and sign a test event with #p tag pointing to us.
         const signedEvent = signer.sign(
           1,
-          [['p', signer.pubkeyHex]],  // Tag ourselves as recipient
+          [['p', signer.pubkeyHex]],
           'Test message to verify relay filtering',
-          Math.floor(Date.now() / 1000)
+          Math.floor(Date.now() / 1000),
         )
+
+        // Subscribe before publishing. SharedFlow does not replay events, so
+        // subscribing afterwards can miss a fast relay response.
+        const receivedEvents: any[] = []
+        const unsubscribe = session.events.subscribe((event: any) => {
+          if (event.id === signedEvent.id) {
+            receivedEvents.push(event)
+          }
+        })
+
+        // Allow the relay a brief moment to register the REQ subscription.
+        await new Promise((resolve) => setTimeout(resolve, 200))
 
         const publishResult = session.publish(signedEvent)
 
         if (!publishResult.ok) {
+          unsubscribe()
           session.close()
-          return { ok: false, reason: `publish failed: ${publishResult.err}` }
+          return { ok: false, reason: `publish failed: ${publishResult.error.message}` }
         }
 
-        // Listen for our own event (relay should filter and route to us)
-        const receivedEvents: any[] = []
-        session.events.subscribe((event: any) => {
-          receivedEvents.push(event)
-        })
+        const receiveDeadline = Date.now() + 5000
+        while (Date.now() < receiveDeadline && receivedEvents.length === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
 
-        await new Promise((r) => setTimeout(r, 1000))
-
+        unsubscribe()
         session.close()
 
         return {
           ok: receivedEvents.length > 0,
-          reason: receivedEvents.length > 0 ? 'relay filtered and routed event' : 'no events received',
+          reason:
+            receivedEvents.length > 0
+              ? 'relay filtered and routed event'
+              : 'no matching event received before timeout',
           eventCount: receivedEvents.length,
           eventId: signedEvent.id,
         }

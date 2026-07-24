@@ -3,6 +3,7 @@ import type {
   DataChannelLike,
   PeerConnectionFactory,
   PeerConnectionLike,
+  PeerConnectionObserver,
   PeerConnectionState,
 } from './peer-connection.interface'
 
@@ -55,10 +56,38 @@ export class LivePeerConnection implements PeerConnectionLike {
   onconnectionstatechange: (() => void) | null = null
   ondatachannel: ((ev: { channel: DataChannelLike }) => void) | null = null
 
-  constructor(private readonly pc: RTCPeerConnection) {
+  constructor(
+    private readonly pc: RTCPeerConnection,
+    observer?: PeerConnectionObserver,
+  ) {
     this.pc.onconnectionstatechange = () => this.onconnectionstatechange?.()
     this.pc.ondatachannel = (ev: RTCDataChannelEvent) => {
       this.ondatachannel?.({ channel: new LiveDataChannel(ev.channel) })
+    }
+
+    // Diagnostic-only wiring. Uses addEventListener (not on* property
+    // assignment) so it is purely additive and cannot alter ICE semantics.
+    // In particular, assigning `pc.onicecandidate` opts a real
+    // RTCPeerConnection into trickle ICE, which prevents iceGatheringState
+    // from reaching 'complete' on some network paths and would stall the
+    // non-trickle waitForIceGatheringComplete() in createOffer/createAnswer.
+    // addEventListener avoids that entirely.
+    if (observer) {
+      this.pc.addEventListener('iceconnectionstatechange', () => {
+        observer.iceConnectionState?.(this.pc.iceConnectionState)
+      })
+      this.pc.addEventListener('icegatheringstatechange', () => {
+        observer.iceGatheringState?.(this.pc.iceGatheringState)
+      })
+      this.pc.addEventListener('signalingstatechange', () => {
+        observer.signalingState?.(this.pc.signalingState)
+      })
+      this.pc.addEventListener('icecandidate', (ev: RTCPeerConnectionIceEvent) => {
+        observer.iceCandidate?.(ev.candidate ? ev.candidate.candidate : null)
+      })
+      this.pc.addEventListener('connectionstatechange', () => {
+        observer.connectionState?.(this.pc.connectionState as PeerConnectionState)
+      })
     }
   }
 
@@ -114,5 +143,6 @@ export class LivePeerConnection implements PeerConnectionLike {
 
 /** Default factory: builds a `LivePeerConnection` around a real `RTCPeerConnection`. */
 export function createLivePeerConnectionFactory(options: LivePeerConnectionOptions = {}): PeerConnectionFactory {
-  return () => new LivePeerConnection(new RTCPeerConnection({ iceServers: options.iceServers }))
+  return (observer?: PeerConnectionObserver) =>
+    new LivePeerConnection(new RTCPeerConnection({ iceServers: options.iceServers }), observer)
 }

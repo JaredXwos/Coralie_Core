@@ -118,7 +118,7 @@ test.describe('Phase 6 - End-to-end integration', () => {
       // Track messages received
       const messagesAtBob: string[] = []
       bob.incomingMessages.subscribe((msg: any) => {
-        messagesAtBob.push(msg.payload)
+        messagesAtBob.push(new TextDecoder().decode(msg.payload))
       })
 
       // Alice initiates connection to Bob
@@ -144,7 +144,10 @@ test.describe('Phase 6 - End-to-end integration', () => {
       }
 
       // Send a message from Alice to Bob
-      alice.sendToPeer(bob.myPubkeyHex, 'hello from alice')
+      alice.sendToPeer(
+        bob.myPubkeyHex,
+        new TextEncoder().encode('hello from alice'),
+      )
       await new Promise((r) => setTimeout(r, 100))
 
       // Verify message received

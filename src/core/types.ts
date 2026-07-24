@@ -20,7 +20,7 @@ export enum LinkState {
 }
 
 /**
- * WebRTC Session Description Protocol wrapper.
+ * WebRTC-compatible session description used directly on the signalling wire.
  */
 export interface SessionDescriptionData {
   type: 'offer' | 'answer'
@@ -31,14 +31,12 @@ export interface SessionDescriptionData {
  * Frame format for data channel communication.
  *
  * Frames are JSON serialized across the WebRTC data channel.
- * Type discriminator determines the payload shape.
+ * Type discriminator determines the payload shape. App payloads use signed
+ * JSON byte values (-128..127), matching Kotlin ByteArray serialization.
  */
 export type DataChannelFrame =
-  | { type: 'Offer'; sessionDescription: SessionDescriptionData; attemptCount: number }
-  | { type: 'Answer'; sessionDescription: SessionDescriptionData }
-  | { type: 'IceCandidate'; candidate: RTCIceCandidateInit }
-  | { type: 'Announce'; pubkeyHex: string }
-  | { type: 'Data'; payload: Uint8Array }
+  | { type: 'announce'; pubkeyHex: string }
+  | { type: 'app'; payload: number[] }
 
 /**
  * Application-level message sent peer-to-peer.
@@ -47,7 +45,7 @@ export interface PeerMessage {
   from: string // sender's pubkey hex
   to: string // recipient's pubkey hex
   timestamp: number
-  payload: unknown
+  payload: Uint8Array
 }
 
 /**

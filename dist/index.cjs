@@ -1,39 +1,27 @@
-"use strict";
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+'use strict';
 
-// src/index.ts
-var index_exports = {};
-__export(index_exports, {
-  LinkState: () => LinkState,
-  createLiveConnectionManager: () => createLiveConnectionManager
-});
-module.exports = __toCommonJS(index_exports);
+var pure = require('nostr-tools/pure');
+var nip44 = require('nostr-tools/nip44');
+
+function _interopNamespace(e) {
+  if (e && e.__esModule) return e;
+  var n = Object.create(null);
+  if (e) {
+    Object.keys(e).forEach(function (k) {
+      if (k !== 'default') {
+        var d = Object.getOwnPropertyDescriptor(e, k);
+        Object.defineProperty(n, k, d.get ? d : {
+          enumerable: true,
+          get: function () { return e[k]; }
+        });
+      }
+    });
+  }
+  n.default = e;
+  return Object.freeze(n);
+}
+
+var nip44__namespace = /*#__PURE__*/_interopNamespace(nip44);
 
 // src/core/state-flow/state-flow.live.ts
 var LiveStateFlow = class {
@@ -248,7 +236,7 @@ var LiveAnswerer = class {
 var HANDSHAKE_TIMEOUT_MS = 3e4;
 var MAX_INITIATION_ATTEMPTS = 5;
 var LiveConnectionManager = class {
-  constructor(signalingClient, peerConnectionFactory, handshakeTimeoutMs) {
+  constructor(signalingClient, peerConnectionFactory, handshakeTimeoutMs, observerFactory) {
     this.initiating = /* @__PURE__ */ new Map();
     this.connected = /* @__PURE__ */ new Map();
     this.timeoutCheckInterval = null;
@@ -257,6 +245,7 @@ var LiveConnectionManager = class {
     this.signalingClient = signalingClient;
     this.peerConnectionFactory = peerConnectionFactory;
     this.handshakeTimeoutMs = handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
+    this.observerFactory = observerFactory;
     this.peers = createStateFlow(/* @__PURE__ */ new Set());
     this.incomingMessages = createSharedFlow();
     this.terminalFailures = createSharedFlow();
@@ -267,18 +256,24 @@ var LiveConnectionManager = class {
     this.signalingClient.inbound.subscribe((message) => {
       if (this.closed) return;
       try {
-        const frame = JSON.parse(message.payload);
-        if (frame.type === "Offer") {
-          this.onInboundOffer(message.fromPubkeyHex, frame.sessionDescription, frame.attemptCount);
-        } else if (frame.type === "Answer") {
-          this.onInboundAnswer(message.fromPubkeyHex, frame.sessionDescription);
-        } else if (frame.type === "Announce") {
-          this.onInboundAnnounce(message.fromPubkeyHex, frame.pubkeyHex);
+        const description = JSON.parse(message.payload);
+        if (!this.isSessionDescription(description)) {
+          throw new Error("Unsupported signalling message");
+        }
+        if (description.type === "offer") {
+          this.onInboundOffer(message.fromPubkeyHex, description);
+        } else {
+          this.onInboundAnswer(message.fromPubkeyHex, description);
         }
       } catch (err2) {
-        console.error(`Failed to parse signalling frame from ${message.fromPubkeyHex}:`, err2);
+        console.error(`Failed to parse signalling message from ${message.fromPubkeyHex}:`, err2);
       }
     });
+  }
+  isSessionDescription(value) {
+    if (typeof value !== "object" || value === null) return false;
+    const description = value;
+    return (description.type === "offer" || description.type === "answer") && typeof description.sdp === "string";
   }
   startTimeoutChecker() {
     this.timeoutCheckInterval = setInterval(() => {
@@ -300,7 +295,8 @@ var LiveConnectionManager = class {
   startInitiation(pubkeyHex) {
     const connection = new LiveInitiator({
       peerConnectionFactory: this.peerConnectionFactory,
-      handshakeTimeoutMs: this.handshakeTimeoutMs
+      handshakeTimeoutMs: this.handshakeTimeoutMs,
+      observer: this.observerFactory?.(pubkeyHex, "initiator")
     });
     const slot = {
       connection,
@@ -324,12 +320,7 @@ var LiveConnectionManager = class {
       const offer = await initiator.createOffer();
       if (this.closed) return;
       if (this.initiating.get(pubkeyHex)?.connection !== initiator) return;
-      const frame = {
-        type: "Offer",
-        sessionDescription: offer,
-        attemptCount: this.initiating.get(pubkeyHex).attemptCount
-      };
-      const result = this.signalingClient.send(pubkeyHex, JSON.stringify(frame));
+      const result = this.signalingClient.send(pubkeyHex, JSON.stringify(offer));
       if (this.closed) return;
       if (this.initiating.get(pubkeyHex)?.connection !== initiator) return;
       if (!result.ok) {
@@ -348,17 +339,19 @@ var LiveConnectionManager = class {
    * - sender is not already `connected`
    * - `initiating` map is empty (global gate)
    */
-  onInboundOffer(fromPubkeyHex, offer, attemptCount) {
+  onInboundOffer(fromPubkeyHex, offer) {
     if (this.closed) return;
     if (this.connected.has(fromPubkeyHex)) return;
     if (this.initiating.size > 0) return;
-    const answerer = new LiveAnswerer({ peerConnectionFactory: this.peerConnectionFactory });
+    const answerer = new LiveAnswerer({
+      peerConnectionFactory: this.peerConnectionFactory,
+      observer: this.observerFactory?.(fromPubkeyHex, "answerer")
+    });
     answerer.state.subscribe((state) => {
       if (this.closed) return;
       if (this.initiating.has(fromPubkeyHex)) return;
       if (state === "Connected") {
         this.onLinkConnected(fromPubkeyHex, answerer.peerLink);
-      } else if (state === "Failed") {
       }
     });
     this.acceptOfferInAnswerer(fromPubkeyHex, answerer, offer);
@@ -367,11 +360,7 @@ var LiveConnectionManager = class {
     try {
       const answer = await answerer.createAnswer(offer);
       if (this.closed) return;
-      const frame = {
-        type: "Answer",
-        sessionDescription: answer
-      };
-      this.signalingClient.send(toPubkeyHex, JSON.stringify(frame));
+      this.signalingClient.send(toPubkeyHex, JSON.stringify(answer));
     } catch (err2) {
       if (this.closed) return;
       console.error(`Failed to create/send answer to ${toPubkeyHex}:`, err2);
@@ -423,7 +412,8 @@ var LiveConnectionManager = class {
     slot.startedAt = Date.now();
     const newConnection = new LiveInitiator({
       peerConnectionFactory: this.peerConnectionFactory,
-      handshakeTimeoutMs: this.handshakeTimeoutMs
+      handshakeTimeoutMs: this.handshakeTimeoutMs,
+      observer: this.observerFactory?.(pubkeyHex, "initiator")
     });
     slot.connection = newConnection;
     newConnection.state.subscribe((state) => {
@@ -439,7 +429,7 @@ var LiveConnectionManager = class {
   }
   /**
    * §2 rule 5: Connection reaches open.
-   * Move from `initiating` to `connected`, broadcast `Announce` to all other
+   * Move from `initiating` to `connected`, broadcast `announce` to all other
    * connected peers (best-effort).
    */
   onLinkConnected(pubkeyHex, peerLink) {
@@ -467,19 +457,35 @@ var LiveConnectionManager = class {
     try {
       const text = new TextDecoder().decode(bytes);
       const frame = JSON.parse(text);
-      if (frame.type === "Data") {
+      if (!this.isDataChannelFrame(frame)) {
+        throw new Error("Unsupported data-channel frame");
+      }
+      if (frame.type === "app") {
         this.incomingMessages.emit({
           from: fromPubkeyHex,
           to: this.myPubkeyHex,
           timestamp: Date.now(),
-          payload: frame.payload
+          payload: Uint8Array.from(frame.payload, (value) => value & 255)
         });
-      } else if (frame.type === "Announce") {
+      } else {
         this.onInboundAnnounce(fromPubkeyHex, frame.pubkeyHex);
       }
     } catch (err2) {
       console.error(`Failed to parse data channel frame from ${fromPubkeyHex}:`, err2);
     }
+  }
+  isDataChannelFrame(value) {
+    if (typeof value !== "object" || value === null) return false;
+    const frame = value;
+    if (frame.type === "announce") {
+      return typeof frame.pubkeyHex === "string";
+    }
+    if (frame.type === "app") {
+      return Array.isArray(frame.payload) && frame.payload.every(
+        (byte) => Number.isInteger(byte) && byte >= -128 && byte <= 255
+      );
+    }
+    return false;
   }
   /**
    * §2 rule 6: Connection closes or fails (post-open).
@@ -500,7 +506,7 @@ var LiveConnectionManager = class {
     this.peers.value = updatedPeers;
   }
   /**
-   * §2 rule 5: broadcast an Announce for one newly-connected pubkey to every
+   * §2 rule 5: broadcast an announce for one newly-connected pubkey to every
    * *other* connected peer. This is not a roster sync — the recipient learns
    * about exactly one new peer, not the sender's full connected set — and the
    * newly-connected peer itself is excluded (it doesn't need telling about
@@ -508,7 +514,7 @@ var LiveConnectionManager = class {
    */
   broadcastAnnounce(newPubkeyHex) {
     const frame = {
-      type: "Announce",
+      type: "announce",
       pubkeyHex: newPubkeyHex
     };
     const bytes = new TextEncoder().encode(JSON.stringify(frame));
@@ -518,7 +524,7 @@ var LiveConnectionManager = class {
     }
   }
   /**
-   * Inbound Announce handling: learn a new peer via gossip (§2 rule 5).
+   * Inbound announce handling: learn a new peer via gossip (§2 rule 5).
    * If already `initiating` or `connected`: no-op (idempotent).
    * Otherwise: call `addPeer()` (same entry point, same idempotency).
    */
@@ -554,8 +560,8 @@ var LiveConnectionManager = class {
     const peerLink = this.connected.get(toPubkeyHex);
     if (!peerLink) return;
     const frame = {
-      type: "Data",
-      payload
+      type: "app",
+      payload: Array.from(payload, (value) => value > 127 ? value - 256 : value)
     };
     const bytes = new TextEncoder().encode(JSON.stringify(frame));
     peerLink.send(bytes);
@@ -767,7 +773,7 @@ function parseRelayMessage(raw) {
 }
 
 // src/nostr/signalling-client/signalling-client.interface.ts
-var SIGNALLING_KIND = 25050;
+var SIGNALLING_KIND = 28080;
 
 // src/nostr/signalling-client/signalling-client.live.ts
 var LiveNostrSignallingClient = class {
@@ -829,10 +835,6 @@ var LiveNostrSignallingClient = class {
     this.inboundFlow.emit({ fromPubkeyHex: event.pubkey, payload: plaintext });
   }
 };
-
-// src/crypto/signer/signer.live.ts
-var import_pure = require("nostr-tools/pure");
-var nip44 = __toESM(require("nostr-tools/nip44"), 1);
 var LiveSigner = class _LiveSigner {
   constructor(secretKey, pubkeyHex) {
     this.secretKey = secretKey;
@@ -840,12 +842,12 @@ var LiveSigner = class _LiveSigner {
   }
   /** Generates a fresh random identity. No persistence, no restore path. */
   static generate() {
-    const secretKey = (0, import_pure.generateSecretKey)();
-    return new _LiveSigner(secretKey, (0, import_pure.getPublicKey)(secretKey));
+    const secretKey = pure.generateSecretKey();
+    return new _LiveSigner(secretKey, pure.getPublicKey(secretKey));
   }
   /** Builds an identity from an existing 32-byte secret key. */
   static fromSecretKey(secretKey) {
-    return new _LiveSigner(secretKey, (0, import_pure.getPublicKey)(secretKey));
+    return new _LiveSigner(secretKey, pure.getPublicKey(secretKey));
   }
   sign(kind, tags, content, createdAt = Math.floor(Date.now() / 1e3)) {
     const unsigned = {
@@ -855,20 +857,20 @@ var LiveSigner = class _LiveSigner {
       tags,
       content
     };
-    return (0, import_pure.finalizeEvent)(unsigned, this.secretKey);
+    return pure.finalizeEvent(unsigned, this.secretKey);
   }
   verify(event) {
-    return (0, import_pure.verifyEvent)(event);
+    return pure.verifyEvent(event);
   }
   getConvoKey(theirPubkeyHex) {
     assertPubkeyHex(theirPubkeyHex);
-    return nip44.v2.utils.getConversationKey(this.secretKey, theirPubkeyHex);
+    return nip44__namespace.v2.utils.getConversationKey(this.secretKey, theirPubkeyHex);
   }
   encryptNip44(plaintext, convoKey) {
-    return nip44.v2.encrypt(plaintext, convoKey);
+    return nip44__namespace.v2.encrypt(plaintext, convoKey);
   }
   decryptNip44(payload, convoKey) {
-    return nip44.v2.decrypt(payload, convoKey);
+    return nip44__namespace.v2.decrypt(payload, convoKey);
   }
 };
 var HEX_64_RE = /^[0-9a-f]{64}$/i;
@@ -907,7 +909,7 @@ var LiveDataChannel = class {
   }
 };
 var LivePeerConnection = class {
-  constructor(pc) {
+  constructor(pc, observer) {
     this.pc = pc;
     this.onconnectionstatechange = null;
     this.ondatachannel = null;
@@ -915,6 +917,23 @@ var LivePeerConnection = class {
     this.pc.ondatachannel = (ev) => {
       this.ondatachannel?.({ channel: new LiveDataChannel(ev.channel) });
     };
+    if (observer) {
+      this.pc.addEventListener("iceconnectionstatechange", () => {
+        observer.iceConnectionState?.(this.pc.iceConnectionState);
+      });
+      this.pc.addEventListener("icegatheringstatechange", () => {
+        observer.iceGatheringState?.(this.pc.iceGatheringState);
+      });
+      this.pc.addEventListener("signalingstatechange", () => {
+        observer.signalingState?.(this.pc.signalingState);
+      });
+      this.pc.addEventListener("icecandidate", (ev) => {
+        observer.iceCandidate?.(ev.candidate ? ev.candidate.candidate : null);
+      });
+      this.pc.addEventListener("connectionstatechange", () => {
+        observer.connectionState?.(this.pc.connectionState);
+      });
+    }
   }
   get connectionState() {
     return this.pc.connectionState;
@@ -979,11 +998,588 @@ function createLiveConnectionManager(options = {}) {
   const signer = LiveSigner.generate();
   const signalingClient = new LiveNostrSignallingClient(signer, relayUrls);
   const peerConnectionFactory = () => new LivePeerConnection(new RTCPeerConnection({ iceServers }));
-  const manager = new LiveConnectionManager(signalingClient, peerConnectionFactory);
+  const manager = new LiveConnectionManager(
+    signalingClient,
+    peerConnectionFactory,
+    options.handshakeTimeoutMs,
+    options.observerFactory
+  );
   return manager;
 }
-// Annotate the CommonJS export names for ESM import in node:
-0 && (module.exports = {
-  LinkState,
-  createLiveConnectionManager
-});
+
+// src/coralie/browser-coralie-host.ts
+var ResponseTooLargeError = class extends Error {
+  constructor(limitBytes, observedBytes, declaredByServer) {
+    super(
+      `Response exceeds size limit: ${observedBytes} bytes observed, ${limitBytes} bytes allowed`
+    );
+    this.limitBytes = limitBytes;
+    this.observedBytes = observedBytes;
+    this.declaredByServer = declaredByServer;
+    this.name = "ResponseTooLargeError";
+  }
+};
+var PUBKEY_PATTERN = /^[0-9a-fA-F]{64}$/;
+var MAX_TIMEOUT_MS = 2147483647;
+var MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024;
+var nextHttpRequestId = 1;
+var BrowserCoralieHost = class {
+  constructor(options = {}, managerFactory = createLiveConnectionManager, fetchImpl = globalThis.fetch.bind(globalThis)) {
+    this.managerUnsubscribers = [];
+    this.currentPeers = [];
+    this.memoryStorage = /* @__PURE__ */ new Map();
+    this.timers = /* @__PURE__ */ new Map();
+    this.meshClosed = false;
+    this.options = options;
+    this.managerFactory = managerFactory;
+    this.fetchImpl = fetchImpl;
+    this.manager = this.managerFactory(this.options);
+    this.bindManager();
+  }
+  apiVersion() {
+    return 2;
+  }
+  hostKind() {
+    return "browser";
+  }
+  getPubkey() {
+    this.assertMeshOpen();
+    return this.manager.myPubkeyHex;
+  }
+  addPeer(pubkeyHex) {
+    this.assertMeshOpen();
+    this.assertPubkey(pubkeyHex, "pubkeyHex");
+    this.manager.addPeer(pubkeyHex.toLowerCase());
+  }
+  sendMessage(toPubkeyHex, payload) {
+    this.assertMeshOpen();
+    this.assertPubkey(toPubkeyHex, "toPubkeyHex");
+    const bytes = this.normaliseOutgoingPayload(payload);
+    const normalizedPubkey = toPubkeyHex.toLowerCase();
+    const connected = this.currentPeers.some(
+      (peer) => peer.pubkeyHex === normalizedPubkey
+    );
+    if (!connected) {
+      throw new Error(`Peer is not connected: ${normalizedPubkey}`);
+    }
+    this.manager.sendToPeer(normalizedPubkey, bytes);
+  }
+  getPeersJson() {
+    this.assertMeshOpen();
+    return JSON.stringify(this.clonePeers(this.currentPeers));
+  }
+  reset() {
+    const nextManager = this.managerFactory(this.options);
+    this.unbindManager();
+    if (!this.meshClosed) this.manager.close();
+    this.manager = nextManager;
+    this.currentPeers = [];
+    this.meshClosed = false;
+    this.bindManager();
+    return this.manager.myPubkeyHex;
+  }
+  /**
+   * Matches Android's `close()`: closes only the mesh. Storage, HTTP and timers
+   * remain usable until the page itself is unloaded.
+   */
+  close() {
+    if (this.meshClosed) return;
+    this.meshClosed = true;
+    this.unbindManager();
+    this.manager.close();
+    this.currentPeers = [];
+    this.dispatch("coralie:peers", []);
+  }
+  storageGetItem(key) {
+    const normalizedKey = String(key);
+    const storage = this.resolveLocalStorage();
+    if (storage) {
+      try {
+        return storage.getItem(normalizedKey);
+      } catch {
+      }
+    }
+    return this.memoryStorage.get(normalizedKey) ?? null;
+  }
+  storageSetItem(key, value) {
+    const normalizedKey = String(key);
+    const normalizedValue = String(value);
+    const storage = this.resolveLocalStorage();
+    if (storage) {
+      try {
+        storage.setItem(normalizedKey, normalizedValue);
+        return;
+      } catch {
+      }
+    }
+    this.memoryStorage.set(normalizedKey, normalizedValue);
+  }
+  storageRemoveItem(key) {
+    const normalizedKey = String(key);
+    const storage = this.resolveLocalStorage();
+    if (storage) {
+      try {
+        storage.removeItem(normalizedKey);
+      } catch {
+      }
+    }
+    this.memoryStorage.delete(normalizedKey);
+  }
+  /**
+   * Browser transport matching Android's JSON request/response surface.
+   *
+   * Differences that are intrinsic to browsers:
+   * - the method returns a Promise;
+   * - CORS still applies;
+   * - redirects use the browser's normal redirect handling.
+   *
+   * Non-permission failures are encoded as status 599, matching Android.
+   */
+  async httpRequestJson(requestJson) {
+    const requestId = nextHttpRequestId++;
+    const startedAt = this.nowMs();
+    let stage = "parse-request";
+    let method = "UNKNOWN";
+    let safeUrl = "(unparsed)";
+    try {
+      const request = this.parseHttpRequest(requestJson);
+      method = request.method;
+      safeUrl = this.safeUrlForDiagnostic(request.url);
+      stage = "browser-fetch";
+      const response = await this.fetchImpl(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.method === "GET" || request.method === "HEAD" ? void 0 : request.body ?? "",
+        credentials: "omit",
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+        redirect: "follow"
+      });
+      stage = "read-response";
+      const body = await this.readResponseBodyLimited(response);
+      const result = {
+        status: response.status,
+        statusText: response.statusText,
+        headers: this.headersToRecord(response.headers),
+        body
+      };
+      return JSON.stringify(result);
+    } catch (error) {
+      const elapsedMs = Math.max(0, this.nowMs() - startedAt);
+      return JSON.stringify(
+        this.httpFailureResponse(
+          requestId,
+          stage,
+          method,
+          safeUrl,
+          elapsedMs,
+          error
+        )
+      );
+    }
+  }
+  timerQueue(id, delaySeconds, payload) {
+    if (!Number.isSafeInteger(delaySeconds) || delaySeconds <= 0) {
+      throw new RangeError(
+        "delaySeconds must be a positive integer"
+      );
+    }
+    const timerId = id == null || id === "" ? this.generateId() : String(id);
+    const normalizedPayload = payload == null ? null : String(payload);
+    this.timerCancel(timerId);
+    const timer = {
+      handle: null,
+      deadlineMs: Date.now() + delaySeconds * 1e3,
+      payload: normalizedPayload
+    };
+    this.timers.set(timerId, timer);
+    this.scheduleTimer(timerId);
+    return timerId;
+  }
+  timerCancel(id) {
+    const normalizedId = String(id);
+    const timer = this.timers.get(normalizedId);
+    if (!timer) return;
+    if (timer.handle !== null) {
+      clearTimeout(timer.handle);
+    }
+    this.timers.delete(normalizedId);
+  }
+  timerListJson() {
+    const now = Date.now();
+    const result = [...this.timers.entries()].map(
+      ([id, timer]) => ({
+        id,
+        remainingMs: Math.max(
+          0,
+          timer.deadlineMs - now
+        )
+      })
+    );
+    return JSON.stringify(result);
+  }
+  scheduleTimer(id) {
+    const timer = this.timers.get(id);
+    if (!timer) return;
+    const remainingMs = timer.deadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      this.fireTimer(id);
+      return;
+    }
+    timer.handle = setTimeout(
+      () => this.scheduleTimer(id),
+      Math.min(remainingMs, MAX_TIMEOUT_MS)
+    );
+  }
+  fireTimer(id) {
+    const timer = this.timers.get(id);
+    if (!timer) return;
+    this.timers.delete(id);
+    const detail = { id };
+    if (timer.payload !== null) {
+      detail.payload = timer.payload;
+    }
+    this.dispatch("coralie:timerFired", detail);
+  }
+  bindManager() {
+    this.managerUnsubscribers = [
+      this.manager.peers.subscribe((peers) => {
+        this.currentPeers = this.normalisePeers(peers);
+        this.dispatch(
+          "coralie:peers",
+          this.clonePeers(this.currentPeers)
+        );
+      }),
+      this.manager.incomingMessages.subscribe((message) => {
+        this.dispatch(
+          "coralie:message",
+          this.normaliseMessage(message)
+        );
+      }),
+      this.manager.terminalFailures.subscribe((failure) => {
+        this.dispatch(
+          "coralie:terminalFailure",
+          this.normaliseFailure(failure)
+        );
+      })
+    ];
+  }
+  unbindManager() {
+    for (const unsubscribe of this.managerUnsubscribers) {
+      unsubscribe();
+    }
+    this.managerUnsubscribers = [];
+  }
+  normalisePeers(peers) {
+    return [...peers].map((peer) => ({
+      pubkeyHex: peer.pubkeyHex.toLowerCase(),
+      connectedAt: peer.connectedAt ?? null
+    }));
+  }
+  normaliseMessage(message) {
+    return {
+      fromPubkeyHex: String(message.from).toLowerCase(),
+      toPubkeyHex: String(message.to).toLowerCase(),
+      timestamp: Number(message.timestamp),
+      payload: Array.from(
+        this.normaliseIncomingPayload(message.payload)
+      )
+    };
+  }
+  normaliseFailure(failure) {
+    return {
+      pubkeyHex: failure.pubkeyHex.toLowerCase(),
+      attemptCount: failure.attemptCount,
+      reason: failure.reason
+    };
+  }
+  normaliseOutgoingPayload(payload) {
+    if (!(payload instanceof Uint8Array) && !Array.isArray(payload)) {
+      throw new TypeError(
+        "payload must be a Uint8Array or integer array"
+      );
+    }
+    return Uint8Array.from(payload, (value, index) => {
+      if (!Number.isInteger(value) || value < 0 || value > 255) {
+        throw new RangeError(
+          `payload[${index}] must be an integer between 0 and 255`
+        );
+      }
+      return value;
+    });
+  }
+  normaliseIncomingPayload(payload) {
+    if (payload instanceof Uint8Array) {
+      return new Uint8Array(payload);
+    }
+    if (payload instanceof ArrayBuffer) {
+      return new Uint8Array(payload);
+    }
+    if (ArrayBuffer.isView(payload)) {
+      return new Uint8Array(
+        payload.buffer,
+        payload.byteOffset,
+        payload.byteLength
+      );
+    }
+    if (Array.isArray(payload)) {
+      return this.normaliseOutgoingPayload(payload);
+    }
+    throw new TypeError(
+      "Incoming payload is not byte-compatible"
+    );
+  }
+  dispatch(eventName, detail) {
+    window.dispatchEvent(
+      new CustomEvent(eventName, { detail })
+    );
+  }
+  clonePeers(peers) {
+    return peers.map((peer) => ({ ...peer }));
+  }
+  resolveLocalStorage() {
+    try {
+      return window.localStorage || null;
+    } catch {
+      return null;
+    }
+  }
+  parseHttpRequest(requestJson) {
+    let parsed;
+    try {
+      parsed = JSON.parse(requestJson);
+    } catch (error) {
+      throw new TypeError(
+        `Invalid HTTP request JSON: ${String(error)}`
+      );
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new TypeError(
+        "HTTP request must be an object"
+      );
+    }
+    const request = parsed;
+    if (typeof request.url !== "string" || request.url.trim() === "") {
+      throw new TypeError(
+        "HTTP request url must be a non-empty string"
+      );
+    }
+    let url;
+    try {
+      url = new URL(request.url.trim());
+    } catch {
+      throw new TypeError(
+        "HTTP request url must be an absolute URL"
+      );
+    }
+    if (url.protocol !== "https:") {
+      throw new TypeError(
+        "Only https requests are allowed"
+      );
+    }
+    const headers = {};
+    if (request.headers !== void 0) {
+      if (typeof request.headers !== "object" || request.headers === null || Array.isArray(request.headers)) {
+        throw new TypeError(
+          "HTTP request headers must be an object"
+        );
+      }
+      for (const [name, value] of Object.entries(request.headers)) {
+        if (typeof value !== "string") {
+          throw new TypeError(
+            `HTTP header ${name} must be a string`
+          );
+        }
+        headers[name] = value;
+      }
+    }
+    const body = request.body == null ? null : request.body;
+    if (body !== null && typeof body !== "string") {
+      throw new TypeError(
+        "HTTP request body must be a string or null"
+      );
+    }
+    const method = (request.method || "GET").trim().toUpperCase();
+    if (method === "") {
+      throw new TypeError(
+        "HTTP request method must be non-empty"
+      );
+    }
+    return {
+      url: url.href,
+      method,
+      headers,
+      body
+    };
+  }
+  headersToRecord(headers) {
+    const result = {};
+    headers.forEach((value, name) => {
+      result[name] = value;
+    });
+    return result;
+  }
+  async readResponseBodyLimited(response) {
+    const declaredHeader = response.headers.get("content-length");
+    const declaredLength = declaredHeader == null ? -1 : Number(declaredHeader);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_HTTP_RESPONSE_BYTES) {
+      throw new ResponseTooLargeError(
+        MAX_HTTP_RESPONSE_BYTES,
+        declaredLength,
+        true
+      );
+    }
+    const charset = this.resolveResponseCharset(response);
+    const decoder = new TextDecoder(charset);
+    if (!response.body) {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength > MAX_HTTP_RESPONSE_BYTES) {
+        throw new ResponseTooLargeError(
+          MAX_HTTP_RESPONSE_BYTES,
+          bytes.byteLength,
+          false
+        );
+      }
+      return decoder.decode(bytes);
+    }
+    const reader = response.body.getReader();
+    let observedBytes = 0;
+    let result = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        observedBytes += value.byteLength;
+        if (observedBytes > MAX_HTTP_RESPONSE_BYTES) {
+          await reader.cancel(
+            "Response exceeds size limit"
+          );
+          throw new ResponseTooLargeError(
+            MAX_HTTP_RESPONSE_BYTES,
+            observedBytes,
+            false
+          );
+        }
+        result += decoder.decode(
+          value,
+          { stream: true }
+        );
+      }
+      result += decoder.decode();
+      return result;
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  resolveResponseCharset(response) {
+    const contentType = response.headers.get("content-type") || "";
+    const match = /(?:^|;)\s*charset\s*=\s*["']?([^;"'\s]+)/i.exec(contentType);
+    return match?.[1] || "utf-8";
+  }
+  httpFailureResponse(requestId, stage, method, safeUrl, elapsedMs, error) {
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    const category = this.classifyHttpFailure(normalized);
+    const diagnostic = {
+      requestId,
+      stage,
+      category,
+      method,
+      url: safeUrl,
+      elapsedMs,
+      message: normalized.message || normalized.name,
+      exception: normalized.name,
+      rootException: normalized.name,
+      causeChain: `${normalized.name}: ${normalized.message}`
+    };
+    if (normalized instanceof ResponseTooLargeError) {
+      diagnostic.limitBytes = normalized.limitBytes;
+      diagnostic.observedBytes = normalized.observedBytes;
+      diagnostic.declaredByServer = normalized.declaredByServer;
+    }
+    return {
+      status: 599,
+      statusText: category === "response-too-large" ? "Browser response too large" : "Browser HTTP failure",
+      headers: {},
+      body: JSON.stringify(diagnostic)
+    };
+  }
+  classifyHttpFailure(error) {
+    if (error instanceof ResponseTooLargeError) {
+      return "response-too-large";
+    }
+    if (error.name === "AbortError") {
+      return "cancelled";
+    }
+    if (error instanceof TypeError && /request|url|header|https|body|json/i.test(error.message)) {
+      return "invalid-request";
+    }
+    if (error instanceof TypeError) {
+      return "network-io";
+    }
+    return "internal";
+  }
+  safeUrlForDiagnostic(rawUrl) {
+    try {
+      const url = new URL(rawUrl);
+      return `${url.protocol}//${url.host}${url.pathname || "/"}`;
+    } catch {
+      return "(unparsed)";
+    }
+  }
+  generateId() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    return `timer-${Date.now()}-` + Math.random().toString(16).slice(2);
+  }
+  assertPubkey(value, fieldName) {
+    if (!PUBKEY_PATTERN.test(value)) {
+      throw new TypeError(
+        `${fieldName} must be a 64-character hexadecimal public key`
+      );
+    }
+  }
+  assertMeshOpen() {
+    if (this.meshClosed) {
+      throw new Error(
+        "Coralie mesh is closed"
+      );
+    }
+  }
+  nowMs() {
+    return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+  }
+};
+
+// src/coralie/install-coralie.ts
+function installBrowserCoralie(options = {}) {
+  if (typeof window === "undefined") {
+    return void 0;
+  }
+  const target = window;
+  if (target.Coralie !== void 0) {
+    return target.Coralie;
+  }
+  const host = new BrowserCoralieHost(options);
+  Object.defineProperty(target, "Coralie", {
+    value: host,
+    writable: false,
+    configurable: false,
+    enumerable: true
+  });
+  return host;
+}
+
+// src/index.ts
+if (typeof window !== "undefined") {
+  installBrowserCoralie();
+}
+
+exports.BrowserCoralieHost = BrowserCoralieHost;
+exports.LinkState = LinkState;
+exports.MAX_HTTP_RESPONSE_BYTES = MAX_HTTP_RESPONSE_BYTES;
+exports.createLiveConnectionManager = createLiveConnectionManager;
+exports.installBrowserCoralie = installBrowserCoralie;
+//# sourceMappingURL=index.cjs.map
+//# sourceMappingURL=index.cjs.map

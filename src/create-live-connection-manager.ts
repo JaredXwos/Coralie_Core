@@ -1,3 +1,4 @@
+import type { PeerConnectionObserver } from './webrtc/peer-connection'
 import type { LiveConnectionManager } from './connection/live-connection-manager.interface'
 import { LiveConnectionManager as LiveConnectionManagerImpl } from './connection/live-connection-manager'
 import { LiveNostrSignallingClient } from './nostr/signalling-client/signalling-client.live'
@@ -26,6 +27,18 @@ export interface CreateLiveConnectionManagerOptions {
    * Defaults to 30000 (30s).
    */
   handshakeTimeoutMs?: number
+
+  /**
+   * Optional diagnostic observer factory. Called once per peer connection
+   * attempt with the peer's pubkey and this side's role, returning an
+   * observer whose handlers receive ICE/connection/candidate events. Purely
+   * for logging/telemetry — has no effect on connection behavior. If omitted,
+   * no diagnostic wiring is attached.
+   */
+  observerFactory?: (
+    peerPubkeyHex: string,
+    role: 'initiator' | 'answerer',
+  ) => PeerConnectionObserver
 }
 
 /**
@@ -58,7 +71,12 @@ export function createLiveConnectionManager(
     new LivePeerConnection(new RTCPeerConnection({ iceServers }))
 
   // Construct and return the orchestrator
-  const manager = new LiveConnectionManagerImpl(signalingClient, peerConnectionFactory)
+  const manager = new LiveConnectionManagerImpl(
+    signalingClient,
+    peerConnectionFactory,
+    options.handshakeTimeoutMs,
+    options.observerFactory,
+  )
 
   return manager
 }

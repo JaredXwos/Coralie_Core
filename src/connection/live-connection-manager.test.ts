@@ -5,6 +5,7 @@ import type { SignallingClient } from '../nostr/signalling-client'
 import type { SessionDescriptionData } from '../core/types'
 import { createSharedFlow } from '../core/shared-flow'
 import { MockPeerConnection } from '../webrtc/peer-connection'
+import { MockPeerLink } from '../webrtc/peer-link'
 
 /**
  * Mock SignallingClient for testing.
@@ -88,8 +89,10 @@ describe('LiveConnectionManager — Six Core Rules', () => {
       await vi.advanceTimersByTimeAsync(100)
 
       expect(offerSent).toBe(true)
-      expect(offerFrame?.type).toBe('Offer')
-      expect(offerFrame?.attemptCount).toBe(1)
+      expect(offerFrame).toEqual({
+        type: 'offer',
+        sdp: 'mock-offer-sdp',
+      })
     })
 
     it('addPeer() called twice with same pubkey is idempotent (no-op second time)', async () => {
@@ -124,12 +127,12 @@ describe('LiveConnectionManager — Six Core Rules', () => {
       await vi.advanceTimersByTimeAsync(100)
 
       const offer: SessionDescriptionData = { type: 'offer', sdp: 'test-offer' }
-      signalingClient.emitInbound('peer-2', JSON.stringify({ type: 'Offer', sessionDescription: offer, attemptCount: 1 }))
+      signalingClient.emitInbound('peer-2', JSON.stringify(offer))
       await vi.advanceTimersByTimeAsync(100)
 
       const answerSent = sendSpy.mock.calls.some((call) => {
         const payload = call[1]
-        return payload && payload.includes('"type":"Answer"')
+        return payload && payload.includes('"type":"answer"')
       })
       expect(answerSent).toBe(false)
     })
@@ -138,12 +141,12 @@ describe('LiveConnectionManager — Six Core Rules', () => {
       const sendSpy = vi.spyOn(signalingClient, 'send').mockReturnValue({ ok: true })
 
       const offer: SessionDescriptionData = { type: 'offer', sdp: 'test-offer' }
-      signalingClient.emitInbound('peer-1', JSON.stringify({ type: 'Offer', sessionDescription: offer, attemptCount: 1 }))
+      signalingClient.emitInbound('peer-1', JSON.stringify(offer))
       await vi.advanceTimersByTimeAsync(100)
 
       const answerSent = sendSpy.mock.calls.some((call) => {
         const payload = call[1]
-        return payload && payload.includes('"type":"Answer"')
+        return payload && payload.includes('"type":"answer"')
       })
       expect(answerSent).toBe(true)
     })
@@ -152,7 +155,7 @@ describe('LiveConnectionManager — Six Core Rules', () => {
   describe('Rule 3: Inbound answer matched to in-flight initiation', () => {
     it('inbound answer with no matching initiation is no-op', async () => {
       const answer: SessionDescriptionData = { type: 'answer', sdp: 'test-answer' }
-      signalingClient.emitInbound('peer-1', JSON.stringify({ type: 'Answer', sessionDescription: answer }))
+      signalingClient.emitInbound('peer-1', JSON.stringify(answer))
       await vi.advanceTimersByTimeAsync(100)
       expect(true).toBe(true)
     })
@@ -203,19 +206,79 @@ describe('LiveConnectionManager — Six Core Rules', () => {
     })
   })
 
-  describe('Announce gossip handling', () => {
-    it('inbound Announce learning new peer calls addPeer idempotently', async () => {
+  describe('Signalling validation', () => {
+    it('ignores non-SDP signalling messages', async () => {
       const sendSpy = vi.spyOn(signalingClient, 'send').mockReturnValue({ ok: true })
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-      signalingClient.emitInbound('source-peer', JSON.stringify({ type: 'Announce', pubkeyHex: 'new-peer' }))
+      signalingClient.emitInbound(
+        'source-peer',
+        JSON.stringify({ type: 'announce', pubkeyHex: 'new-peer' }),
+      )
       await vi.advanceTimersByTimeAsync(100)
 
-      const firstCallCount = sendSpy.mock.calls.length
+      expect(sendSpy).not.toHaveBeenCalled()
+      expect(errorSpy).toHaveBeenCalled()
 
-      signalingClient.emitInbound('source-peer', JSON.stringify({ type: 'Announce', pubkeyHex: 'new-peer' }))
-      await vi.advanceTimersByTimeAsync(100)
+      errorSpy.mockRestore()
+    })
+  })
 
-      expect(sendSpy.mock.calls.length).toBe(firstCallCount)
+
+  describe('Data-channel frame format', () => {
+    it('sends application bytes as a lowercase app frame with a JSON array', () => {
+      const peerLink = new MockPeerLink()
+      const concreteManager = manager as unknown as {
+        connected: Map<string, MockPeerLink>
+      }
+      concreteManager.connected.set('peer-1', peerLink)
+
+      manager.sendToPeer('peer-1', new Uint8Array([0, 127, 128, 255]))
+
+      expect(peerLink.sent).toHaveLength(1)
+      const frame = JSON.parse(new TextDecoder().decode(peerLink.sent[0]))
+      expect(frame).toEqual({
+        type: 'app',
+        payload: [0, 127, -128, -1],
+      })
+    })
+
+    it('normalises signed Android bytes when receiving an app frame', () => {
+      let receivedPayload: Uint8Array | undefined
+      manager.incomingMessages.subscribe((message) => {
+        receivedPayload = message.payload
+      })
+
+      const frame = new TextEncoder().encode(
+        JSON.stringify({ type: 'app', payload: [0, 127, -128, -1] }),
+      )
+      const concreteManager = manager as unknown as {
+        onIncomingDataChannel(fromPubkeyHex: string, bytes: Uint8Array): void
+      }
+      concreteManager.onIncomingDataChannel('peer-1', frame)
+
+      expect(receivedPayload).toEqual(new Uint8Array([0, 127, 128, 255]))
+    })
+
+    it('broadcasts announcements using the lowercase announce frame', () => {
+      const existingPeer = new MockPeerLink()
+      const newPeer = new MockPeerLink()
+      const concreteManager = manager as unknown as {
+        connected: Map<string, MockPeerLink>
+        broadcastAnnounce(newPubkeyHex: string): void
+      }
+      concreteManager.connected.set('existing-peer', existingPeer)
+      concreteManager.connected.set('new-peer', newPeer)
+
+      concreteManager.broadcastAnnounce('new-peer')
+
+      expect(existingPeer.sent).toHaveLength(1)
+      expect(newPeer.sent).toHaveLength(0)
+      const frame = JSON.parse(new TextDecoder().decode(existingPeer.sent[0]))
+      expect(frame).toEqual({
+        type: 'announce',
+        pubkeyHex: 'new-peer',
+      })
     })
   })
 

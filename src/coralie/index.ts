@@ -1,9 +1,4 @@
-import { installBrowserCoralie } from './coralie/install-coralie'
-
-if (typeof window !== 'undefined') {
-  installBrowserCoralie()
-}
-
+/** Public package entry point. */
 export {
   BrowserCoralieHost,
   MAX_HTTP_RESPONSE_BYTES,
@@ -18,24 +13,29 @@ export type {
   HttpRequestData,
   HttpResponseData,
   MaybePromise,
-  MeshPeer,
+  MeshPeer as CoralieMeshPeer,
   PeerMessageEventDetail,
-  TerminalFailure,
+  TerminalFailure as CoralieTerminalFailure,
   TerminalFailureEventDetail,
   TimerFiredEventDetail,
   TimerInfo,
 } from './coralie/coralie-host.interface'
 
 export { createLiveConnectionManager } from './create-live-connection-manager'
-export type { CreateLiveConnectionManagerOptions } from './create-live-connection-manager'
+export type {
+  CreateLiveConnectionManagerOptions,
+} from './create-live-connection-manager'
+
 export type {
   LiveConnectionManager,
-  MeshPeer as LiveMeshPeer,
+  MeshPeer,
 } from './connection/live-connection-manager.interface'
-export type {
-  PeerMessage as LivePeerMessage,
-  TerminalFailure as LiveTerminalFailure,
-} from './core/types'
+
 export { LinkState } from './core/types'
+export type {
+  PeerMessage,
+  TerminalFailure,
+} from './core/types'
+
 export type { StateFlow } from './core/state-flow'
 export type { SharedFlow } from './core/shared-flow'

@@ -5,7 +5,7 @@ import type { SignallingClient } from '../nostr/signalling-client'
 import type { SharedFlow } from '../core/shared-flow'
 import type { MutableStateFlow } from '../core/state-flow'
 import type { DataChannelFrame, SessionDescriptionData, LinkState, TerminalFailure, PeerMessage } from '../core/types'
-import type { PeerConnectionFactory } from '../webrtc/peer-connection'
+import type { PeerConnectionFactory, PeerConnectionObserver } from '../webrtc/peer-connection'
 
 import { LiveInitiator } from '../webrtc/initiator'
 import { LiveAnswerer } from '../webrtc/answerer'
@@ -53,16 +53,19 @@ export class LiveConnectionManager implements LiveConnectionManager {
   private timeoutCheckInterval: number | null = null
   private closed = false
   private handshakeTimeoutMs: number
+  private observerFactory?: (peerPubkeyHex: string, role: 'initiator' | 'answerer') => PeerConnectionObserver
 
   constructor(
     signalingClient: SignallingClient,
     peerConnectionFactory: PeerConnectionFactory,
     handshakeTimeoutMs?: number,
+    observerFactory?: (peerPubkeyHex: string, role: 'initiator' | 'answerer') => PeerConnectionObserver,
   ) {
     this.myPubkeyHex = signalingClient.myPubkeyHex
     this.signalingClient = signalingClient
     this.peerConnectionFactory = peerConnectionFactory
     this.handshakeTimeoutMs = handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS
+    this.observerFactory = observerFactory
 
     this.peers = createStateFlow(new Set<MeshPeer>())
     this.incomingMessages = createSharedFlow<PeerMessage>()
@@ -77,19 +80,31 @@ export class LiveConnectionManager implements LiveConnectionManager {
       if (this.closed) return
 
       try {
-        const frame: DataChannelFrame = JSON.parse(message.payload)
+        const description: unknown = JSON.parse(message.payload)
 
-        if (frame.type === 'Offer') {
-          this.onInboundOffer(message.fromPubkeyHex, frame.sessionDescription, frame.attemptCount)
-        } else if (frame.type === 'Answer') {
-          this.onInboundAnswer(message.fromPubkeyHex, frame.sessionDescription)
-        } else if (frame.type === 'Announce') {
-          this.onInboundAnnounce(message.fromPubkeyHex, frame.pubkeyHex)
+        if (!this.isSessionDescription(description)) {
+          throw new Error('Unsupported signalling message')
+        }
+
+        if (description.type === 'offer') {
+          this.onInboundOffer(message.fromPubkeyHex, description)
+        } else {
+          this.onInboundAnswer(message.fromPubkeyHex, description)
         }
       } catch (err) {
-        console.error(`Failed to parse signalling frame from ${message.fromPubkeyHex}:`, err)
+        console.error(`Failed to parse signalling message from ${message.fromPubkeyHex}:`, err)
       }
     })
+  }
+
+  private isSessionDescription(value: unknown): value is SessionDescriptionData {
+    if (typeof value !== 'object' || value === null) return false
+
+    const description = value as Record<string, unknown>
+    return (
+      (description.type === 'offer' || description.type === 'answer') &&
+      typeof description.sdp === 'string'
+    )
   }
 
   private startTimeoutChecker(): void {
@@ -116,6 +131,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
     const connection = new LiveInitiator({
       peerConnectionFactory: this.peerConnectionFactory,
       handshakeTimeoutMs: this.handshakeTimeoutMs,
+      observer: this.observerFactory?.(pubkeyHex, 'initiator'),
     })
 
     const slot: InitiatingSlot = {
@@ -147,13 +163,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
       if (this.closed) return
       if (this.initiating.get(pubkeyHex)?.connection !== initiator) return // Stale
 
-      const frame: DataChannelFrame = {
-        type: 'Offer',
-        sessionDescription: offer,
-        attemptCount: this.initiating.get(pubkeyHex)!.attemptCount,
-      }
-
-      const result = this.signalingClient.send(pubkeyHex, JSON.stringify(frame))
+      const result = this.signalingClient.send(pubkeyHex, JSON.stringify(offer))
       if (this.closed) return
       if (this.initiating.get(pubkeyHex)?.connection !== initiator) return // Stale
 
@@ -175,7 +185,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
    * - sender is not already `connected`
    * - `initiating` map is empty (global gate)
    */
-  private onInboundOffer(fromPubkeyHex: string, offer: SessionDescriptionData, attemptCount: number): void {
+  private onInboundOffer(fromPubkeyHex: string, offer: SessionDescriptionData): void {
     if (this.closed) return
 
     // Reject if sender is already connected
@@ -185,7 +195,10 @@ export class LiveConnectionManager implements LiveConnectionManager {
     if (this.initiating.size > 0) return
 
     // Accept: become answerer
-    const answerer = new LiveAnswerer({ peerConnectionFactory: this.peerConnectionFactory })
+    const answerer = new LiveAnswerer({
+      peerConnectionFactory: this.peerConnectionFactory,
+      observer: this.observerFactory?.(fromPubkeyHex, 'answerer'),
+    })
 
     // Watch for connection state changes (wired up before accepting the offer
     // so we can't miss a synchronous/near-synchronous 'Connected' transition)
@@ -211,12 +224,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
       const answer = await answerer.createAnswer(offer)
       if (this.closed) return
 
-      const frame: DataChannelFrame = {
-        type: 'Answer',
-        sessionDescription: answer,
-      }
-
-      this.signalingClient.send(toPubkeyHex, JSON.stringify(frame))
+      this.signalingClient.send(toPubkeyHex, JSON.stringify(answer))
     } catch (err) {
       if (this.closed) return
       console.error(`Failed to create/send answer to ${toPubkeyHex}:`, err)
@@ -286,6 +294,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
     const newConnection = new LiveInitiator({
       peerConnectionFactory: this.peerConnectionFactory,
       handshakeTimeoutMs: this.handshakeTimeoutMs,
+      observer: this.observerFactory?.(pubkeyHex, 'initiator'),
     })
     slot.connection = newConnection
 
@@ -307,7 +316,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
 
   /**
    * §2 rule 5: Connection reaches open.
-   * Move from `initiating` to `connected`, broadcast `Announce` to all other
+   * Move from `initiating` to `connected`, broadcast `announce` to all other
    * connected peers (best-effort).
    */
   private onLinkConnected(pubkeyHex: string, peerLink: PeerLink): void {
@@ -340,7 +349,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
       }
     })
 
-    // §2 rule 5: broadcast an Announce for this new pubkey to every *other*
+    // §2 rule 5: broadcast an announce for this new pubkey to every *other*
     // connected peer (not a roster — just the one peer that just joined).
     this.broadcastAnnounce(pubkeyHex)
   }
@@ -350,21 +359,46 @@ export class LiveConnectionManager implements LiveConnectionManager {
 
     try {
       const text = new TextDecoder().decode(bytes)
-      const frame: DataChannelFrame = JSON.parse(text)
+      const frame: unknown = JSON.parse(text)
 
-      if (frame.type === 'Data') {
+      if (!this.isDataChannelFrame(frame)) {
+        throw new Error('Unsupported data-channel frame')
+      }
+
+      if (frame.type === 'app') {
         this.incomingMessages.emit({
           from: fromPubkeyHex,
           to: this.myPubkeyHex,
           timestamp: Date.now(),
-          payload: frame.payload,
+          payload: Uint8Array.from(frame.payload, (value) => value & 0xff),
         })
-      } else if (frame.type === 'Announce') {
+      } else {
         this.onInboundAnnounce(fromPubkeyHex, frame.pubkeyHex)
       }
     } catch (err) {
       console.error(`Failed to parse data channel frame from ${fromPubkeyHex}:`, err)
     }
+  }
+
+  private isDataChannelFrame(value: unknown): value is DataChannelFrame {
+    if (typeof value !== 'object' || value === null) return false
+
+    const frame = value as Record<string, unknown>
+
+    if (frame.type === 'announce') {
+      return typeof frame.pubkeyHex === 'string'
+    }
+
+    if (frame.type === 'app') {
+      return (
+        Array.isArray(frame.payload) &&
+        frame.payload.every(
+          (byte) => Number.isInteger(byte) && byte >= -128 && byte <= 255,
+        )
+      )
+    }
+
+    return false
   }
 
   /**
@@ -391,7 +425,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
   }
 
   /**
-   * §2 rule 5: broadcast an Announce for one newly-connected pubkey to every
+   * §2 rule 5: broadcast an announce for one newly-connected pubkey to every
    * *other* connected peer. This is not a roster sync — the recipient learns
    * about exactly one new peer, not the sender's full connected set — and the
    * newly-connected peer itself is excluded (it doesn't need telling about
@@ -399,7 +433,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
    */
   private broadcastAnnounce(newPubkeyHex: string): void {
     const frame: DataChannelFrame = {
-      type: 'Announce',
+      type: 'announce',
       pubkeyHex: newPubkeyHex,
     }
     const bytes = new TextEncoder().encode(JSON.stringify(frame))
@@ -411,7 +445,7 @@ export class LiveConnectionManager implements LiveConnectionManager {
   }
 
   /**
-   * Inbound Announce handling: learn a new peer via gossip (§2 rule 5).
+   * Inbound announce handling: learn a new peer via gossip (§2 rule 5).
    * If already `initiating` or `connected`: no-op (idempotent).
    * Otherwise: call `addPeer()` (same entry point, same idempotency).
    */
@@ -448,15 +482,15 @@ export class LiveConnectionManager implements LiveConnectionManager {
    * Send a message to a connected peer via data channel.
    * If not connected: dropped silently.
    */
-  sendToPeer(toPubkeyHex: string, payload: unknown): void {
+  sendToPeer(toPubkeyHex: string, payload: Uint8Array): void {
     if (this.closed) return
 
     const peerLink = this.connected.get(toPubkeyHex)
     if (!peerLink) return
 
     const frame: DataChannelFrame = {
-      type: 'Data',
-      payload: payload as Uint8Array,
+      type: 'app',
+      payload: Array.from(payload, (value) => (value > 127 ? value - 256 : value)),
     }
 
     const bytes = new TextEncoder().encode(JSON.stringify(frame))

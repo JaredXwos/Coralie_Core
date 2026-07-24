@@ -8,7 +8,7 @@ function fakeEvent(id: string, overrides: Partial<NostrEvent> = {}): NostrEvent 
     id,
     pubkey: 'a'.repeat(64),
     created_at: 0,
-    kind: 25050,
+    kind: 28080,
     tags: [],
     content: '',
     sig: 'b'.repeat(128),
@@ -124,10 +124,10 @@ describe('LiveRelaySession', () => {
 
   it('filters by kinds when provided', () => {
     const socket = new MockRelaySocket()
-    new LiveRelaySession(socket, 'c'.repeat(64), [25050])
+    new LiveRelaySession(socket, 'c'.repeat(64), [28080])
     socket.open()
 
     const filter = JSON.parse(socket.sent[0])[2]
-    expect(filter.kinds).toEqual([25050])
+    expect(filter.kinds).toEqual([28080])
   })
 })
