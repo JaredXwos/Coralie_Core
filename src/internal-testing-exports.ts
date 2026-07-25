@@ -5,12 +5,13 @@
  * Phase 5 trimmed `src/index.ts` down to the public API
  * (`createLiveConnectionManager`, `LinkState`, etc.) and `exports.test.ts`
  * guards `dist/index.js` against leaking internals. This file is a
- * second, separate tsup entry (see `tsup.config.ts`) that builds to
- * `dist/internal-testing.global.js` — it exists so the demo page and
+ * separate test-only tsup entry (see `tsup.internal.config.ts`) that builds
+ * to `test-dist/internal-testing.global.js`. It exists so the demo page and
  * Phase 6 harness can reach the crypto/nostr/webrtc internals directly
  * (real signer, real relay socket, real initiator/answerer, real
  * connection-manager class with an injectable SignallingClient) without
- * reopening the public surface that `dist/index.global.js` ships.
+ * reopening the package's public surface. The test bundle is outside
+ * `dist/` and is therefore not included in the published package files.
  *
  * Do not import this file from `src/index.ts`.
  */

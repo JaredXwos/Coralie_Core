@@ -112,7 +112,7 @@ var LiveInitiator = class {
     this.timeoutHandle = null;
     this.link = null;
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
-    this.pc = options.peerConnectionFactory();
+    this.pc = options.peerConnectionFactory(options.observer);
     this.pc.onconnectionstatechange = () => this.handleConnectionStateChange();
   }
   get state() {
@@ -175,7 +175,7 @@ var LiveAnswerer = class {
   constructor(options) {
     this.stateFlow = createStateFlow("Answering" /* Answering */);
     this.link = null;
-    this.pc = options.peerConnectionFactory();
+    this.pc = options.peerConnectionFactory(options.observer);
     this.pc.onconnectionstatechange = () => this.handleConnectionStateChange();
     this.pc.ondatachannel = (ev) => this.wireDataChannel(ev.channel);
   }
@@ -975,7 +975,7 @@ function createLiveConnectionManager(options = {}) {
   const iceServers = options.iceServers ?? DEFAULT_MESH_ENDPOINTS.iceServers;
   const signer = LiveSigner.generate();
   const signalingClient = new LiveNostrSignallingClient(signer, relayUrls);
-  const peerConnectionFactory = () => new LivePeerConnection(new RTCPeerConnection({ iceServers }));
+  const peerConnectionFactory = (observer) => new LivePeerConnection(new RTCPeerConnection({ iceServers }), observer);
   const manager = new LiveConnectionManager(
     signalingClient,
     peerConnectionFactory,
@@ -1162,7 +1162,7 @@ var BrowserCoralieHost = class {
         "delaySeconds must be a positive integer"
       );
     }
-    const timerId = id == null || id === "" ? this.generateId() : String(id);
+    const timerId = id === null ? this.generateId() : String(id);
     const normalizedPayload = payload == null ? null : String(payload);
     this.timerCancel(timerId);
     const timer = {

@@ -286,7 +286,7 @@ export class BrowserCoralieHost implements CoralieHost {
     }
 
     const timerId =
-      id == null || id === ''
+      id === null
         ? this.generateId()
         : String(id)
     const normalizedPayload =

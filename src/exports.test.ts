@@ -39,41 +39,41 @@ describe('exports (build-output test)', () => {
   it('should not export internal Signer modules', async () => {
     const mod = await import('../dist/index.js')
 
-    expect(mod.LiveSigner).toBeUndefined()
-    expect(mod.MockSigner).toBeUndefined()
+    expect((mod as Record<string, unknown>)['LiveSigner']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['MockSigner']).toBeUndefined()
   })
 
   it('should not export internal Nostr modules', async () => {
     const mod = await import('../dist/index.js')
 
-    expect(mod.LiveRelaySocket).toBeUndefined()
-    expect(mod.MockRelaySocket).toBeUndefined()
-    expect(mod.LiveRelaySession).toBeUndefined()
-    expect(mod.MockRelaySession).toBeUndefined()
-    expect(mod.LiveNostrSignallingClient).toBeUndefined()
-    expect(mod.MockNostrSignallingClient).toBeUndefined()
-    expect(mod.LiveEventSink).toBeUndefined()
-    expect(mod.MockEventSink).toBeUndefined()
+    expect((mod as Record<string, unknown>)['LiveRelaySocket']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['MockRelaySocket']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['LiveRelaySession']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['MockRelaySession']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['LiveNostrSignallingClient']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['MockNostrSignallingClient']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['LiveEventSink']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['MockEventSink']).toBeUndefined()
   })
 
   it('should not export internal WebRTC modules', async () => {
     const mod = await import('../dist/index.js')
 
-    expect(mod.LivePeerConnection).toBeUndefined()
-    expect(mod.MockPeerConnection).toBeUndefined()
-    expect(mod.LiveInitiator).toBeUndefined()
-    expect(mod.MockInitiator).toBeUndefined()
-    expect(mod.LiveAnswerer).toBeUndefined()
-    expect(mod.MockAnswerer).toBeUndefined()
-    expect(mod.LivePeerLink).toBeUndefined()
-    expect(mod.MockPeerLink).toBeUndefined()
+    expect((mod as Record<string, unknown>)['LivePeerConnection']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['MockPeerConnection']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['LiveInitiator']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['MockInitiator']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['LiveAnswerer']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['MockAnswerer']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['LivePeerLink']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['MockPeerLink']).toBeUndefined()
   })
 
   it('should not export mutable core-flow implementations', async () => {
     const mod = await import('../dist/index.js')
 
-    expect(mod.createStateFlow).toBeUndefined()
-    expect(mod.createSharedFlow).toBeUndefined()
+    expect((mod as Record<string, unknown>)['createStateFlow']).toBeUndefined()
+    expect((mod as Record<string, unknown>)['createSharedFlow']).toBeUndefined()
   })
 
   it('should not export the connection-manager implementation class', async () => {
@@ -81,7 +81,7 @@ describe('exports (build-output test)', () => {
 
     // LiveConnectionManager is a TypeScript interface and must not become a
     // runtime implementation export.
-    expect(mod.LiveConnectionManager).toBeUndefined()
+    expect((mod as Record<string, unknown>)['LiveConnectionManager']).toBeUndefined()
   })
 
   it('should list exactly the runtime-visible exports', async () => {

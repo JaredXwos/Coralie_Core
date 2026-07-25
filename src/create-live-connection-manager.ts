@@ -67,8 +67,8 @@ export function createLiveConnectionManager(
   const signalingClient = new LiveNostrSignallingClient(signer, relayUrls)
 
   // Create a peer connection factory with the configured ICE servers
-  const peerConnectionFactory = () =>
-    new LivePeerConnection(new RTCPeerConnection({ iceServers }))
+  const peerConnectionFactory = (observer?: PeerConnectionObserver) =>
+    new LivePeerConnection(new RTCPeerConnection({ iceServers }), observer)
 
   // Construct and return the orchestrator
   const manager = new LiveConnectionManagerImpl(

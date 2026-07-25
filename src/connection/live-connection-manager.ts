@@ -2,7 +2,7 @@ import type { Initiator } from '../webrtc/initiator'
 import type { Answerer } from '../webrtc/answerer'
 import type { PeerLink } from '../webrtc/peer-link'
 import type { SignallingClient } from '../nostr/signalling-client'
-import type { SharedFlow } from '../core/shared-flow'
+import type { MutableSharedFlow } from '../core/shared-flow'
 import type { MutableStateFlow } from '../core/state-flow'
 import type { DataChannelFrame, SessionDescriptionData, LinkState, TerminalFailure, PeerMessage } from '../core/types'
 import type { PeerConnectionFactory, PeerConnectionObserver } from '../webrtc/peer-connection'
@@ -11,7 +11,7 @@ import { LiveInitiator } from '../webrtc/initiator'
 import { LiveAnswerer } from '../webrtc/answerer'
 import { createStateFlow } from '../core/state-flow'
 import { createSharedFlow } from '../core/shared-flow'
-import type { MeshPeer, LiveConnectionManager } from './live-connection-manager.interface'
+import type { MeshPeer, LiveConnectionManager as LiveConnectionManagerContract } from './live-connection-manager.interface'
 
 const HANDSHAKE_TIMEOUT_MS = 30_000
 const MAX_INITIATION_ATTEMPTS = 5
@@ -39,11 +39,11 @@ interface InitiatingSlot {
  * verify identity of the slot before mutating state. This is the sole
  * concurrency mechanism — no locks, no queues.
  */
-export class LiveConnectionManager implements LiveConnectionManager {
+export class LiveConnectionManager implements LiveConnectionManagerContract {
   readonly myPubkeyHex: string
   readonly peers: MutableStateFlow<Set<MeshPeer>>
-  readonly incomingMessages: SharedFlow<PeerMessage>
-  readonly terminalFailures: SharedFlow<TerminalFailure>
+  readonly incomingMessages: MutableSharedFlow<PeerMessage>
+  readonly terminalFailures: MutableSharedFlow<TerminalFailure>
 
   private initiating = new Map<string, InitiatingSlot>()
   private connected = new Map<string, PeerLink>()

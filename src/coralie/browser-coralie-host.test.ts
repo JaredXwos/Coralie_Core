@@ -270,7 +270,7 @@ describe('BrowserCoralieHost', () => {
         }) as Headers,
         body: null,
         arrayBuffer: vi.fn(),
-      }) as Response,
+      }) as unknown as Response,
     ) as unknown as typeof fetch
 
     const host = new BrowserCoralieHost(
@@ -296,6 +296,23 @@ describe('BrowserCoralieHost', () => {
       observedBytes: MAX_HTTP_RESPONSE_BYTES + 1,
       declaredByServer: true,
     })
+  })
+
+  it('generates a timer ID only when the ID is null', () => {
+    const fixture = createManagerFixture()
+    const host = new BrowserCoralieHost({}, () => fixture.manager)
+
+    const generatedId = host.timerQueue(null, 30, null)
+    const emptyId = host.timerQueue('', 30, null)
+
+    expect(generatedId).not.toBe('')
+    expect(emptyId).toBe('')
+    expect(JSON.parse(host.timerListJson())).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: generatedId }),
+        expect.objectContaining({ id: '' }),
+      ]),
+    )
   })
 
   it('keeps storage usable after the mesh is closed', () => {

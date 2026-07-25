@@ -69,8 +69,8 @@ export type MaybePromise<T> = T | Promise<T>
 
 /**
  * Flat page-facing API shared by Android's native bridge and the browser host.
- * Page code should use `await` for consumed return values because Android may
- * return synchronously while the browser may return a Promise.
+ * Page code should use `await` for consumed return values because a host
+ * method may be synchronous in one implementation and asynchronous in another.
  */
 export interface CoralieHost {
   apiVersion(): number

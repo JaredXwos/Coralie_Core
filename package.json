@@ -1,39 +1,54 @@
 {
   "name": "nostr-webrtc-mesh",
   "version": "0.0.0",
-  "description": "Fast, lightweight peer to peer messaging via WebRTC over Nostr. Gossip-based peer discovery, no central roster, minimal handshake overhead.",
+  "description": "Portable Coralie HTML runtime and lightweight WebRTC-over-Nostr peer mesh for browser and Android interoperability.",
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "main": "./dist/index.cjs",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "docs"
   ],
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest watch",
-    "test:e2e": "playwright test",
-    "typecheck": "tsc --noEmit",
-    "build": "npm run build:library && npm run build:host",
+    "clean": "node scripts/clean.mjs",
+    "build": "npm run clean && npm run build:library && npm run build:host && npm run build:test-harness",
     "build:library": "tsup --config tsup.config.ts",
     "build:host": "tsup --config tsup.host.config.ts",
+    "build:test-harness": "tsup --config tsup.internal.config.ts",
+    "pretest": "npm run build:library",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "pretest:e2e": "npm run build",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "pretest:integration": "npm run build",
     "test:integration": "playwright test src/integration.spec.ts --headed",
+    "pretest:integration:headless": "npm run build",
     "test:integration:headless": "playwright test src/integration.spec.ts"
   },
   "keywords": [
+    "coralie",
+    "html-runtime",
     "nostr",
     "webrtc",
     "mesh",
     "p2p",
-    "networking"
+    "party-game",
+    "static-site"
   ],
-  "license": "MIT",
+  "license": "UNLICENSED",
   "dependencies": {
     "nostr-tools": "^2.23.12"
   },
@@ -50,5 +65,7 @@
   },
   "overrides": {
     "esbuild": "^0.28.1"
-  }
+  },
+  "module": "./dist/index.js",
+  "sideEffects": true
 }

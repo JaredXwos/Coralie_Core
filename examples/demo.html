@@ -220,22 +220,10 @@
 
 </main>
 
-<!-- Public build of the package -->
-<script src="../dist/index.global.js"></script>
 <!-- Internal-only build for this test/demo page — see src/internal-testing-exports.ts.
-     Never shipped to consumers; exists purely so this page and the Phase 6
-     Playwright harness can reach crypto/nostr/webrtc internals directly. -->
-<script src="../dist/internal-testing.global.js"></script>
-<script>
-  // Ensure both globals are on window (IIFE creates top-level vars but we
-  // want them explicitly on window for page.evaluate() in Playwright).
-  if (typeof CoralieCore !== 'undefined') {
-    window.CoralieCore = CoralieCore;
-  }
-  if (typeof CoralieInternal !== 'undefined') {
-    window.CoralieInternal = CoralieInternal;
-  }
-</script>
+     It is generated under test-dist/ and is not included in the package's
+     public dist/ output. -->
+<script src="../test-dist/internal-testing.global.js"></script>
 <script>
 (function () {
   const {

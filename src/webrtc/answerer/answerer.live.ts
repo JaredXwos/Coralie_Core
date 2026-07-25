@@ -1,11 +1,13 @@
 import { createStateFlow, type StateFlow } from '../../core/state-flow'
 import { LinkState, type SessionDescriptionData } from '../../core/types'
 import { LivePeerLink, type PeerLink } from '../peer-link'
-import type { DataChannelLike, PeerConnectionFactory, PeerConnectionLike } from '../peer-connection'
+import type { DataChannelLike, PeerConnectionFactory, PeerConnectionLike, PeerConnectionObserver } from '../peer-connection'
 import type { Answerer } from './answerer.interface'
 
 export interface LiveAnswererOptions {
   peerConnectionFactory: PeerConnectionFactory
+  /** Optional diagnostic observer forwarded to the peer connection factory. */
+  observer?: PeerConnectionObserver
 }
 
 export class LiveAnswerer implements Answerer {
@@ -14,7 +16,7 @@ export class LiveAnswerer implements Answerer {
   private link: PeerLink | null = null
 
   constructor(options: LiveAnswererOptions) {
-    this.pc = options.peerConnectionFactory()
+    this.pc = options.peerConnectionFactory(options.observer)
     this.pc.onconnectionstatechange = () => this.handleConnectionStateChange()
     this.pc.ondatachannel = (ev) => this.wireDataChannel(ev.channel)
   }

@@ -12,7 +12,7 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   dts: true,
-  clean: true,
+  clean: false,
   treeshake: true,
   outExtension({ format }: { format: string }) {
     return {

@@ -1,7 +1,7 @@
 import { createStateFlow, type StateFlow } from '../../core/state-flow'
 import { LinkState, type SessionDescriptionData } from '../../core/types'
 import { LivePeerLink, type PeerLink } from '../peer-link'
-import type { DataChannelLike, PeerConnectionFactory, PeerConnectionLike } from '../peer-connection'
+import type { DataChannelLike, PeerConnectionFactory, PeerConnectionLike, PeerConnectionObserver } from '../peer-connection'
 import type { Initiator } from './initiator.interface'
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 30_000
@@ -11,6 +11,8 @@ export interface LiveInitiatorOptions {
   peerConnectionFactory: PeerConnectionFactory
   /** Wall-clock timeout for the whole offer→connected cycle. Default 30s (§3). */
   handshakeTimeoutMs?: number
+  /** Optional diagnostic observer forwarded to the peer connection factory. */
+  observer?: PeerConnectionObserver
 }
 
 export class LiveInitiator implements Initiator {
@@ -22,7 +24,7 @@ export class LiveInitiator implements Initiator {
 
   constructor(options: LiveInitiatorOptions) {
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
-    this.pc = options.peerConnectionFactory()
+    this.pc = options.peerConnectionFactory(options.observer)
     this.pc.onconnectionstatechange = () => this.handleConnectionStateChange()
   }
 
