@@ -28,11 +28,21 @@ interface InitiatingSlot {
 }
 
 /**
+ * One in-flight answer for a peer. Keeping the offer alongside the answerer
+ * lets us distinguish a duplicate relay delivery from a fresh initiator retry.
+ */
+interface AnsweringSlot {
+  connection: Answerer
+  offer: SessionDescriptionData
+}
+
+/**
  * LiveConnectionManager: orchestrator for the mesh, enforcing §2's six rules
  * and §4's concurrency discipline.
  *
  * State maps:
  * - `initiating`: pubkeyHex → { connection, attemptCount, startedAt }
+ * - `answering`: pubkeyHex → { connection, offer }
  * - `connected`: pubkeyHex → PeerLink (data channel wrapper)
  *
  * Concurrency: after every async operation (signalling send, timeout check),
@@ -46,6 +56,7 @@ export class LiveConnectionManager implements LiveConnectionManagerContract {
   readonly terminalFailures: MutableSharedFlow<TerminalFailure>
 
   private initiating = new Map<string, InitiatingSlot>()
+  private answering = new Map<string, AnsweringSlot>()
   private connected = new Map<string, PeerLink>()
 
   private signalingClient: SignallingClient
@@ -122,6 +133,7 @@ export class LiveConnectionManager implements LiveConnectionManagerContract {
     if (this.closed) return
     if (pubkeyHex === this.myPubkeyHex) return // Ignore self
     if (this.initiating.has(pubkeyHex)) return // Already initiating
+    if (this.answering.has(pubkeyHex)) return // Already answering
     if (this.connected.has(pubkeyHex)) return // Already connected
 
     this.startInitiation(pubkeyHex)
@@ -181,52 +193,87 @@ export class LiveConnectionManager implements LiveConnectionManagerContract {
 
   /**
    * §2 rule 2: Inbound offer handling.
-   * Accept only if:
-   * - sender is not already `connected`
-   * - `initiating` map is empty (global gate)
+   *
+   * There is no global initiation lock: this node may answer peer C while it
+   * is initiating peers A and B. The gate is per peer only. If this node is
+   * already initiating the sender, the offer is ignored so the one-sided role
+   * selected by gossip remains intact.
+   *
+   * While answering a peer, an exact repeat of the same offer is a duplicate
+   * relay delivery. A different SDP is a fresh initiator retry and replaces
+   * the unfinished answerer; otherwise every retry would be ignored until the
+   * first answerer eventually failed.
    */
   private onInboundOffer(fromPubkeyHex: string, offer: SessionDescriptionData): void {
     if (this.closed) return
-
-    // Reject if sender is already connected
     if (this.connected.has(fromPubkeyHex)) return
+    if (this.initiating.has(fromPubkeyHex)) return
 
-    // Reject if we are actively initiating toward anyone
-    if (this.initiating.size > 0) return
+    const existing = this.answering.get(fromPubkeyHex)
+    if (existing) {
+      if (this.sameSessionDescription(existing.offer, offer)) return
 
-    // Accept: become answerer
+      this.answering.delete(fromPubkeyHex)
+      existing.connection.close()
+    }
+
     const answerer = new LiveAnswerer({
       peerConnectionFactory: this.peerConnectionFactory,
       observer: this.observerFactory?.(fromPubkeyHex, 'answerer'),
     })
+    const slot: AnsweringSlot = { connection: answerer, offer }
+    this.answering.set(fromPubkeyHex, slot)
 
     // Watch for connection state changes (wired up before accepting the offer
     // so we can't miss a synchronous/near-synchronous 'Connected' transition)
     answerer.state.subscribe((state) => {
       if (this.closed) return
-      if (this.initiating.has(fromPubkeyHex)) return // Should not happen in answer path
+      if (this.answering.get(fromPubkeyHex) !== slot) return // Stale/replaced
 
       if (state === 'Connected') {
         this.onLinkConnected(fromPubkeyHex, answerer.peerLink!)
       } else if (state === 'Failed') {
-        // Answerer failures are silent; we do not retry (rule 4 applies only to initiators)
+        this.answering.delete(fromPubkeyHex)
+        answerer.close()
       }
     })
 
     // Create and send the answer (exactly once — calling this twice would run
     // setRemoteDescription()/setLocalDescription() a second time on the same
     // RTCPeerConnection, which real WebRTC treats as a fresh renegotiation)
-    this.acceptOfferInAnswerer(fromPubkeyHex, answerer, offer)
+    this.acceptOfferInAnswerer(fromPubkeyHex, slot)
   }
 
-  private async acceptOfferInAnswerer(toPubkeyHex: string, answerer: Answerer, offer: SessionDescriptionData): Promise<void> {
-    try {
-      const answer = await answerer.createAnswer(offer)
-      if (this.closed) return
+  private sameSessionDescription(
+    left: SessionDescriptionData,
+    right: SessionDescriptionData,
+  ): boolean {
+    return left.type === right.type && left.sdp === right.sdp
+  }
 
-      this.signalingClient.send(toPubkeyHex, JSON.stringify(answer))
+  private async acceptOfferInAnswerer(
+    toPubkeyHex: string,
+    slot: AnsweringSlot,
+  ): Promise<void> {
+    try {
+      const answer = await slot.connection.createAnswer(slot.offer)
+      if (this.closed) return
+      if (this.answering.get(toPubkeyHex) !== slot) return // Replaced by retry
+
+      const result = this.signalingClient.send(toPubkeyHex, JSON.stringify(answer))
+      if (this.closed) return
+      if (this.answering.get(toPubkeyHex) !== slot) return // Replaced while sending
+
+      if (!result.ok) {
+        this.answering.delete(toPubkeyHex)
+        slot.connection.close()
+      }
     } catch (err) {
       if (this.closed) return
+      if (this.answering.get(toPubkeyHex) !== slot) return // Stale failure
+
+      this.answering.delete(toPubkeyHex)
+      slot.connection.close()
       console.error(`Failed to create/send answer to ${toPubkeyHex}:`, err)
     }
   }
@@ -322,8 +369,15 @@ export class LiveConnectionManager implements LiveConnectionManagerContract {
   private onLinkConnected(pubkeyHex: string, peerLink: PeerLink): void {
     if (this.closed) return
 
-    // Remove from initiating (no-op if this was an answerer)
+    const existing = this.connected.get(pubkeyHex)
+    if (existing) {
+      if (existing !== peerLink) peerLink.close()
+      return
+    }
+
+    // Remove whichever in-flight role produced this link.
     this.initiating.delete(pubkeyHex)
+    this.answering.delete(pubkeyHex)
 
     // Add to connected
     this.connected.set(pubkeyHex, peerLink)
@@ -453,6 +507,7 @@ export class LiveConnectionManager implements LiveConnectionManagerContract {
     if (this.closed) return
     if (pubkeyHex === this.myPubkeyHex) return // Ignore self
     if (this.initiating.has(pubkeyHex)) return // Already initiating
+    if (this.answering.has(pubkeyHex)) return // Already answering
     if (this.connected.has(pubkeyHex)) return // Already connected
 
     // Learn new peer via gossip
@@ -512,6 +567,11 @@ export class LiveConnectionManager implements LiveConnectionManagerContract {
       slot.connection.close()
     }
     this.initiating.clear()
+
+    for (const slot of this.answering.values()) {
+      slot.connection.close()
+    }
+    this.answering.clear()
 
     for (const peerLink of this.connected.values()) {
       peerLink.close()

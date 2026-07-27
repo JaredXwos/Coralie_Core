@@ -46,6 +46,21 @@ class MockPeerConnectionFactory {
   }
 }
 
+class DeferredAnswerPeerConnection extends MockPeerConnection {
+  private resolveDeferredAnswer!: (answer: SessionDescriptionData) => void
+  private readonly deferredAnswer = new Promise<SessionDescriptionData>((resolve) => {
+    this.resolveDeferredAnswer = resolve
+  })
+
+  createAnswer(): Promise<SessionDescriptionData> {
+    return this.deferredAnswer
+  }
+
+  resolveAnswer(answer: SessionDescriptionData): void {
+    this.resolveDeferredAnswer(answer)
+  }
+}
+
 function createTestConnectionManager(
   signalingClient: MockSignallingClient,
   factory: MockPeerConnectionFactory,
@@ -119,8 +134,8 @@ describe('LiveConnectionManager — Six Core Rules', () => {
     })
   })
 
-  describe('Rule 2: Always open to answering, gated by empty initiating', () => {
-    it('inbound offer rejected while initiating is non-empty', async () => {
+  describe('Rule 2: Answering is gated per peer, not globally', () => {
+    it('answers an unrelated peer while initiating another peer', async () => {
       const sendSpy = vi.spyOn(signalingClient, 'send').mockReturnValue({ ok: true })
 
       manager.addPeer('peer-1')
@@ -131,13 +146,30 @@ describe('LiveConnectionManager — Six Core Rules', () => {
       await vi.advanceTimersByTimeAsync(100)
 
       const answerSent = sendSpy.mock.calls.some((call) => {
-        const payload = call[1]
-        return payload && payload.includes('"type":"answer"')
+        const [to, payload] = call
+        return to === 'peer-2' && payload.includes('"type":"answer"')
+      })
+      expect(answerSent).toBe(true)
+    })
+
+    it('ignores an offer from the same peer currently being initiated', async () => {
+      const sendSpy = vi.spyOn(signalingClient, 'send').mockReturnValue({ ok: true })
+
+      manager.addPeer('peer-1')
+      await vi.advanceTimersByTimeAsync(100)
+
+      const offer: SessionDescriptionData = { type: 'offer', sdp: 'same-peer-offer' }
+      signalingClient.emitInbound('peer-1', JSON.stringify(offer))
+      await vi.advanceTimersByTimeAsync(100)
+
+      const answerSent = sendSpy.mock.calls.some((call) => {
+        const [to, payload] = call
+        return to === 'peer-1' && payload.includes('"type":"answer"')
       })
       expect(answerSent).toBe(false)
     })
 
-    it('inbound offer accepted when initiating is empty', async () => {
+    it('accepts an inbound offer when no role is active for that peer', async () => {
       const sendSpy = vi.spyOn(signalingClient, 'send').mockReturnValue({ ok: true })
 
       const offer: SessionDescriptionData = { type: 'offer', sdp: 'test-offer' }
@@ -149,6 +181,79 @@ describe('LiveConnectionManager — Six Core Rules', () => {
         return payload && payload.includes('"type":"answer"')
       })
       expect(answerSent).toBe(true)
+    })
+
+    it('addPeer() is a no-op while already answering that peer', async () => {
+      const sendSpy = vi.spyOn(signalingClient, 'send').mockReturnValue({ ok: true })
+      const offer: SessionDescriptionData = { type: 'offer', sdp: 'test-offer' }
+
+      signalingClient.emitInbound('peer-1', JSON.stringify(offer))
+      await vi.advanceTimersByTimeAsync(100)
+      manager.addPeer('peer-1')
+      await vi.advanceTimersByTimeAsync(100)
+
+      const messagesToPeer = sendSpy.mock.calls
+        .filter(([to]) => to === 'peer-1')
+        .map(([, payload]) => JSON.parse(payload) as SessionDescriptionData)
+
+      expect(messagesToPeer).toEqual([
+        { type: 'answer', sdp: 'mock-answer-sdp' },
+      ])
+    })
+
+    it('ignores an exact duplicate offer while its answerer is active', async () => {
+      const sendSpy = vi.spyOn(signalingClient, 'send').mockReturnValue({ ok: true })
+      const offer: SessionDescriptionData = { type: 'offer', sdp: 'same-offer' }
+
+      signalingClient.emitInbound('peer-1', JSON.stringify(offer))
+      await vi.advanceTimersByTimeAsync(100)
+      signalingClient.emitInbound('peer-1', JSON.stringify(offer))
+      await vi.advanceTimersByTimeAsync(100)
+
+      const answersToPeer = sendSpy.mock.calls.filter(([to, payload]) =>
+        to === 'peer-1' && payload.includes('"type":"answer"'),
+      )
+      expect(answersToPeer).toHaveLength(1)
+      expect(factory.connections).toHaveLength(1)
+    })
+
+    it('replaces an unfinished answerer for a retry offer and suppresses its stale answer', async () => {
+      manager.close()
+
+      const firstAnswerer = new DeferredAnswerPeerConnection()
+      const replacementAnswerer = new MockPeerConnection()
+      const queuedConnections = [firstAnswerer, replacementAnswerer]
+      manager = new LiveConnectionManager(
+        signalingClient,
+        () => {
+          const connection = queuedConnections.shift()
+          if (!connection) throw new Error('Unexpected peer connection creation')
+          return connection
+        },
+      )
+
+      const sendSpy = vi.spyOn(signalingClient, 'send').mockReturnValue({ ok: true })
+      const firstOffer: SessionDescriptionData = { type: 'offer', sdp: 'offer-attempt-1' }
+      const retryOffer: SessionDescriptionData = { type: 'offer', sdp: 'offer-attempt-2' }
+
+      signalingClient.emitInbound('peer-1', JSON.stringify(firstOffer))
+      await vi.advanceTimersByTimeAsync(0)
+      signalingClient.emitInbound('peer-1', JSON.stringify(retryOffer))
+      await vi.advanceTimersByTimeAsync(0)
+
+      const answersBeforeStaleCompletion = sendSpy.mock.calls.filter(([to, payload]) =>
+        to === 'peer-1' && payload.includes('"type":"answer"'),
+      )
+      expect(answersBeforeStaleCompletion).toHaveLength(1)
+      expect(firstAnswerer.connectionState).toBe('closed')
+
+      firstAnswerer.resolveAnswer({ type: 'answer', sdp: 'stale-answer' })
+      await vi.advanceTimersByTimeAsync(0)
+
+      const answersAfterStaleCompletion = sendSpy.mock.calls.filter(([to, payload]) =>
+        to === 'peer-1' && payload.includes('"type":"answer"'),
+      )
+      expect(answersAfterStaleCompletion).toHaveLength(1)
     })
   })
 
