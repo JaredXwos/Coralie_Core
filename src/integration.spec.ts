@@ -18,35 +18,59 @@ test.describe('Integration: Real relay connectivity', () => {
   })
 
   test('browser WebSocket capability check', async ({ page }) => {
-    // First, verify the browser can even attempt WebSocket connections.
-    // file:// protocol pages have restricted WebSocket access in some browsers.
-    const canWebSocket = await page.evaluate(async () => {
-      return new Promise<boolean>((resolve) => {
-        const timeout = setTimeout(() => resolve(false), 2000)
-        try {
-          const ws = new WebSocket('wss://relay.damus.io')
-          ws.onopen = () => {
-            clearTimeout(timeout)
-            ws.close()
-            resolve(true)
-          }
-          ws.onerror = () => {
-            clearTimeout(timeout)
-            resolve(false)
-          }
-        } catch (e) {
-          clearTimeout(timeout)
-          resolve(false)
-        }
-      })
-    })
+    // Probe every configured relay instead of self-skipping after a short
+    // timeout against one endpoint. At least one successful WSS connection
+    // proves that the browser context supports the capability used by Coralie.
+    const results = await page.evaluate(async (relayUrls: string[]) => {
+      return Promise.all(
+        relayUrls.map(
+          (relayUrl) =>
+            new Promise<{ relayUrl: string; ok: boolean; reason: string }>((resolve) => {
+              let settled = false
+              let socket: WebSocket | null = null
 
-    if (!canWebSocket) {
-      test.skip()
-      return
-    }
+              const finish = (ok: boolean, reason: string) => {
+                if (settled) return
+                settled = true
+                clearTimeout(timeout)
 
-    expect(canWebSocket).toBe(true)
+                try {
+                  socket?.close()
+                } catch {
+                  // Closing a failed probe is best effort only.
+                }
+
+                resolve({ relayUrl, ok, reason })
+              }
+
+              const timeout = setTimeout(
+                () => finish(false, 'connection timed out'),
+                8000,
+              )
+
+              try {
+                socket = new WebSocket(relayUrl)
+                socket.onopen = () => finish(true, 'connected')
+                socket.onerror = () => finish(false, 'WebSocket error')
+                socket.onclose = () => finish(false, 'closed before opening')
+              } catch (error) {
+                finish(
+                  false,
+                  error instanceof Error ? error.message : String(error),
+                )
+              }
+            }),
+        ),
+      )
+    }, REAL_RELAYS)
+
+    const successes = results.filter((result) => result.ok)
+
+    expect(
+      successes.length,
+      `No browser WebSocket probe connected:
+${JSON.stringify(results, null, 2)}`,
+    ).toBeGreaterThan(0)
   })
 
   test('can connect to a real Nostr relay', async ({ page }) => {

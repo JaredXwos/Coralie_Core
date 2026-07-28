@@ -216,6 +216,7 @@ var MAX_INITIATION_ATTEMPTS = 5;
 var LiveConnectionManager = class {
   constructor(signalingClient, peerConnectionFactory, handshakeTimeoutMs, observerFactory) {
     this.initiating = /* @__PURE__ */ new Map();
+    this.answering = /* @__PURE__ */ new Map();
     this.connected = /* @__PURE__ */ new Map();
     this.timeoutCheckInterval = null;
     this.closed = false;
@@ -267,6 +268,7 @@ var LiveConnectionManager = class {
     if (this.closed) return;
     if (pubkeyHex === this.myPubkeyHex) return;
     if (this.initiating.has(pubkeyHex)) return;
+    if (this.answering.has(pubkeyHex)) return;
     if (this.connected.has(pubkeyHex)) return;
     this.startInitiation(pubkeyHex);
   }
@@ -313,34 +315,65 @@ var LiveConnectionManager = class {
   }
   /**
    * §2 rule 2: Inbound offer handling.
-   * Accept only if:
-   * - sender is not already `connected`
-   * - `initiating` map is empty (global gate)
+   *
+   * There is no global initiation lock: this node may answer peer C while it
+   * is initiating peers A and B. The gate is per peer only. If this node is
+   * already initiating the sender, the offer is ignored so the one-sided role
+   * selected by gossip remains intact.
+   *
+   * While answering a peer, an exact repeat of the same offer is a duplicate
+   * relay delivery. A different SDP is a fresh initiator retry and replaces
+   * the unfinished answerer; otherwise every retry would be ignored until the
+   * first answerer eventually failed.
    */
   onInboundOffer(fromPubkeyHex, offer) {
     if (this.closed) return;
     if (this.connected.has(fromPubkeyHex)) return;
-    if (this.initiating.size > 0) return;
+    if (this.initiating.has(fromPubkeyHex)) return;
+    const existing = this.answering.get(fromPubkeyHex);
+    if (existing) {
+      if (this.sameSessionDescription(existing.offer, offer)) return;
+      this.answering.delete(fromPubkeyHex);
+      existing.connection.close();
+    }
     const answerer = new LiveAnswerer({
       peerConnectionFactory: this.peerConnectionFactory,
       observer: this.observerFactory?.(fromPubkeyHex, "answerer")
     });
+    const slot = { connection: answerer, offer };
+    this.answering.set(fromPubkeyHex, slot);
     answerer.state.subscribe((state) => {
       if (this.closed) return;
-      if (this.initiating.has(fromPubkeyHex)) return;
+      if (this.answering.get(fromPubkeyHex) !== slot) return;
       if (state === "Connected") {
         this.onLinkConnected(fromPubkeyHex, answerer.peerLink);
+      } else if (state === "Failed") {
+        this.answering.delete(fromPubkeyHex);
+        answerer.close();
       }
     });
-    this.acceptOfferInAnswerer(fromPubkeyHex, answerer, offer);
+    this.acceptOfferInAnswerer(fromPubkeyHex, slot);
   }
-  async acceptOfferInAnswerer(toPubkeyHex, answerer, offer) {
+  sameSessionDescription(left, right) {
+    return left.type === right.type && left.sdp === right.sdp;
+  }
+  async acceptOfferInAnswerer(toPubkeyHex, slot) {
     try {
-      const answer = await answerer.createAnswer(offer);
+      const answer = await slot.connection.createAnswer(slot.offer);
       if (this.closed) return;
-      this.signalingClient.send(toPubkeyHex, JSON.stringify(answer));
+      if (this.answering.get(toPubkeyHex) !== slot) return;
+      const result = this.signalingClient.send(toPubkeyHex, JSON.stringify(answer));
+      if (this.closed) return;
+      if (this.answering.get(toPubkeyHex) !== slot) return;
+      if (!result.ok) {
+        this.answering.delete(toPubkeyHex);
+        slot.connection.close();
+      }
     } catch (err2) {
       if (this.closed) return;
+      if (this.answering.get(toPubkeyHex) !== slot) return;
+      this.answering.delete(toPubkeyHex);
+      slot.connection.close();
       console.error(`Failed to create/send answer to ${toPubkeyHex}:`, err2);
     }
   }
@@ -412,7 +445,13 @@ var LiveConnectionManager = class {
    */
   onLinkConnected(pubkeyHex, peerLink) {
     if (this.closed) return;
+    const existing = this.connected.get(pubkeyHex);
+    if (existing) {
+      if (existing !== peerLink) peerLink.close();
+      return;
+    }
     this.initiating.delete(pubkeyHex);
+    this.answering.delete(pubkeyHex);
     this.connected.set(pubkeyHex, peerLink);
     const updatedPeers = new Set(this.peers.value);
     updatedPeers.add({ pubkeyHex, connectedAt: Date.now() });
@@ -510,6 +549,7 @@ var LiveConnectionManager = class {
     if (this.closed) return;
     if (pubkeyHex === this.myPubkeyHex) return;
     if (this.initiating.has(pubkeyHex)) return;
+    if (this.answering.has(pubkeyHex)) return;
     if (this.connected.has(pubkeyHex)) return;
     this.addPeer(pubkeyHex);
   }
@@ -557,6 +597,10 @@ var LiveConnectionManager = class {
       slot.connection.close();
     }
     this.initiating.clear();
+    for (const slot of this.answering.values()) {
+      slot.connection.close();
+    }
+    this.answering.clear();
     for (const peerLink of this.connected.values()) {
       peerLink.close();
     }
