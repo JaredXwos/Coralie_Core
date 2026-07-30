@@ -5,6 +5,7 @@ node_modules/
 .serena/
 .idea/
 .vscode/
+.zed/
 
 # Environment files and local secrets
 .env

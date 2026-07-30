@@ -1,0 +1,23 @@
+{
+  "name": "Coralie Core Dev Container",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "remoteUser": "vscode",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin"
+  },
+  "mounts": [
+    "source=coralie-core-codex-home,target=/home/vscode/.codex,type=volume"
+  ],
+  "runArgs": [
+    "--name",
+    "coralie-core-devcontainer",
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges"
+  ]
+}
