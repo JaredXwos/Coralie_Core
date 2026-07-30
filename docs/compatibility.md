@@ -476,6 +476,25 @@ After close:
 - HTTP remains usable subject to permissions; and
 - timers remain usable.
 
+### Synchronous message-send failures
+
+`sendMessage(toPubkeyHex, payload)` is synchronous on both hosts. It returns
+`undefined` on success and throws a structural `CoralieSendMessageError` for a
+controlled failure. Every such error has `operation: "sendMessage"` and a
+lowercased `target`.
+
+| Failure | Error name | Message |
+|---|---|---|
+| Invalid public key or payload byte | `InvalidArgumentError` | Original validation message |
+| Missing/disconnected peer or channel delivery failure | `PeerUnavailableError` | `Peer disconnected or channel unavailable` |
+| Closed/unavailable host | `CoralieHostError` | `Unable to send message` |
+| Android permission denial | `PermissionRejectedError` | Android permission diagnostic |
+
+The browser never emits `PermissionRejectedError`; Android may emit it for its
+protected operation. A peer snapshot is not a delivery guarantee: disconnect
+can occur between reading the snapshot and calling `sendMessage()`, producing
+`PeerUnavailableError`.
+
 ### `reset()`
 
 Both implementations create a replacement mesh and return a replacement identity.
@@ -737,6 +756,17 @@ A release should test at least:
 - Android permission rejection is handled;
 - HTTP 3xx behaviour is understood; and
 - timer events drive the same application reducer.
+
+### Message-send contract tests
+
+| Case | Browser | Android | Lower layer |
+|---|---|---|---|
+| Success is synchronous and returns `undefined` | Required | Required | `Result<void>` is `ok` |
+| Uppercase destination normalizes in `target` | Required | Required | N/A |
+| Invalid public key/payload byte preserves validation message | Required | Required | N/A |
+| Missing peer and disconnect race | `PeerUnavailableError` | `PeerUnavailableError` | Missing link is `err` |
+| Channel delivery failure | `PeerUnavailableError` | `PeerUnavailableError` | Failed link is removed and closed |
+| Permission rejection | Not emitted | `PermissionRejectedError` | N/A |
 
 ### Network matrix
 

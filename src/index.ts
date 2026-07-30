@@ -14,6 +14,8 @@ export type {
   CoralieBytePayload,
   CoralieHost,
   CoralieHostKind,
+  CoralieSendMessageError,
+  CoralieSendMessageErrorName,
   HttpFailureDiagnostic,
   HttpRequestData,
   HttpResponseData,

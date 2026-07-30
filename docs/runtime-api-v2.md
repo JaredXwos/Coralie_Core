@@ -135,6 +135,19 @@ export type CoralieBytePayload =
 
 export type MaybePromise<T> = T | Promise<T>;
 
+export type CoralieSendMessageErrorName =
+  | 'PeerUnavailableError'
+  | 'PermissionRejectedError'
+  | 'InvalidArgumentError'
+  | 'CoralieHostError';
+
+export interface CoralieSendMessageError
+  extends Error {
+  name: CoralieSendMessageErrorName;
+  operation: 'sendMessage';
+  target: string;
+}
+
 export interface CoralieHost {
   apiVersion(): number;
   hostKind(): CoralieHostKind;
@@ -144,7 +157,7 @@ export interface CoralieHost {
   sendMessage(
     toPubkeyHex: string,
     payload: CoralieBytePayload,
-  ): MaybePromise<void>;
+  ): void;
   getPeersJson(): MaybePromise<string>;
   reset(): MaybePromise<string>;
   close(): MaybePromise<void>;
@@ -357,7 +370,7 @@ Current implementations use a 30-second handshake timeout and no more than five 
 sendMessage(
   toPubkeyHex: string,
   payload: Uint8Array | readonly number[],
-): MaybePromise<void>;
+): void;
 ```
 
 Sends one application payload to one directly connected peer.
@@ -370,6 +383,38 @@ The method MUST:
 - reject calls after the mesh has been closed.
 
 Successful return means that the host accepted the payload for the connected data channel. It is not an end-to-end acknowledgement from the remote application.
+The method is synchronous on both hosts and returns `undefined` on success.
+It never returns a Promise.
+
+Controlled failures throw an `Error` with this structural contract:
+
+```ts
+interface CoralieSendMessageError extends Error {
+  name:
+    | 'PeerUnavailableError'
+    | 'PermissionRejectedError'
+    | 'InvalidArgumentError'
+    | 'CoralieHostError';
+  operation: 'sendMessage';
+  target: string; // lowercased destination supplied by the caller
+}
+```
+
+`InvalidArgumentError` preserves the validation message for an invalid public
+key, payload type, or payload byte. `PeerUnavailableError` uses the exact
+message `Peer disconnected or channel unavailable` when the peer is missing,
+has disconnected, or the channel send fails. `CoralieHostError` covers a
+closed or otherwise unavailable host and uses the exact message
+`Unable to send message`.
+
+Android can additionally throw `PermissionRejectedError` when its protected
+operation is denied. The browser host does not emit that name because it has
+no mesh permission prompt.
+
+The peer snapshot can race with disconnection. A peer returned by
+`getPeersJson()` can disconnect before the immediately following
+`sendMessage()` call, in which case `PeerUnavailableError` is the expected
+result.
 
 The API does not provide:
 
@@ -386,11 +431,13 @@ To broadcast, a page sends separately to each peer in the current snapshot.
 const peers = JSON.parse(await host.getPeersJson());
 const bytes = new TextEncoder().encode(message);
 
-const results = await Promise.allSettled(
-  peers.map(peer =>
-    host.sendMessage(peer.pubkeyHex, bytes),
-  ),
-);
+for (const peer of peers) {
+  try {
+    host.sendMessage(peer.pubkeyHex, bytes);
+  } catch (error) {
+    // Handle the synchronous CoralieSendMessageError.
+  }
+}
 ```
 
 Pages SHOULD keep payloads bounded and define their own schema version, identifiers, sequence rules, and validation.

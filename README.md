@@ -221,9 +221,9 @@ your-site/
 
     document.querySelector("#send").addEventListener(
       "click",
-      async () => {
+      () => {
         try {
-          await host.sendMessage(
+          host.sendMessage(
             peerKeyInput.value.trim(),
             encoder.encode(messageInput.value),
           );
@@ -332,7 +332,7 @@ const payload = new TextEncoder().encode(
   }),
 );
 
-await host.sendMessage(peerPubkeyHex, payload);
+host.sendMessage(peerPubkeyHex, payload);
 ```
 
 On receipt, validate the parsed object, sender authority, identifiers, ranges, and state transition before applying it.

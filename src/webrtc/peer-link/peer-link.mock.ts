@@ -1,6 +1,8 @@
 import { createSharedFlow, type SharedFlow } from '../../core/shared-flow'
 import { createStateFlow, type StateFlow } from '../../core/state-flow'
 import type { PeerLink, PeerLinkState } from './peer-link.interface'
+import type { Result } from '../../core/types'
+import { err, ok } from '../../core/types'
 
 /**
  * A `PeerLink` test double for exercising consumers (e.g. the future
@@ -21,11 +23,12 @@ export class MockPeerLink implements PeerLink {
     return this.incomingBytesFlow.asReadOnly()
   }
 
-  send(data: Uint8Array): void {
+  send(data: Uint8Array): Result<void> {
     if (this.stateFlow.value !== 'open') {
-      throw new Error('cannot send on a closed PeerLink')
+      return err(new Error('cannot send on a closed PeerLink'))
     }
     this.sent.push(data)
+    return ok(undefined)
   }
 
   close(): void {

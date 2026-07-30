@@ -67,6 +67,18 @@ export interface TimerFiredEventDetail {
 export type CoralieBytePayload = Uint8Array | readonly number[]
 export type MaybePromise<T> = T | Promise<T>
 
+export type CoralieSendMessageErrorName =
+  | 'PeerUnavailableError'
+  | 'PermissionRejectedError'
+  | 'InvalidArgumentError'
+  | 'CoralieHostError'
+
+export interface CoralieSendMessageError extends Error {
+  name: CoralieSendMessageErrorName
+  operation: 'sendMessage'
+  target: string
+}
+
 /**
  * Flat page-facing API shared by Android's native bridge and the browser host.
  * Page code should use `await` for consumed return values because a host
@@ -81,7 +93,7 @@ export interface CoralieHost {
   sendMessage(
     toPubkeyHex: string,
     payload: CoralieBytePayload,
-  ): MaybePromise<void>
+  ): void
   getPeersJson(): MaybePromise<string>
   reset(): MaybePromise<string>
   close(): MaybePromise<void>

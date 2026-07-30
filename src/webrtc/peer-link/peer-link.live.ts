@@ -2,6 +2,8 @@ import { createSharedFlow, type SharedFlow } from '../../core/shared-flow'
 import { createStateFlow, type StateFlow } from '../../core/state-flow'
 import type { DataChannelLike } from '../peer-connection'
 import type { PeerLink, PeerLinkState } from './peer-link.interface'
+import type { Result } from '../../core/types'
+import { err, ok } from '../../core/types'
 
 export class LivePeerLink implements PeerLink {
   private readonly stateFlow = createStateFlow<PeerLinkState>('open')
@@ -24,11 +26,20 @@ export class LivePeerLink implements PeerLink {
     return this.incomingBytesFlow.asReadOnly()
   }
 
-  send(data: Uint8Array): void {
+  send(data: Uint8Array): Result<void> {
     if (this.stateFlow.value !== 'open') {
-      throw new Error('cannot send on a closed PeerLink')
+      return err(new Error('cannot send on a closed PeerLink'))
     }
-    this.channel.send(data)
+    try {
+      this.channel.send(data)
+      return ok(undefined)
+    } catch (error) {
+      return err(
+        error instanceof Error
+          ? error
+          : new Error(String(error)),
+      )
+    }
   }
 
   close(): void {

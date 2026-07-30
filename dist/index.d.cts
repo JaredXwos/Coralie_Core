@@ -35,6 +35,18 @@ interface TerminalFailure$1 {
     attemptCount: number;
     reason: string;
 }
+/**
+ * Lightweight `Result` type, mirroring the Kotlin reference's use of
+ * `Result<T>` for fallible operations (e.g. a relay send that may be
+ * rejected because the socket isn't open).
+ */
+type Result<T, E = Error> = {
+    ok: true;
+    value: T;
+} | {
+    ok: false;
+    error: E;
+};
 
 type PeerConnectionState = 'new' | 'connecting' | 'connected' | 'disconnected' | 'failed' | 'closed';
 /**
@@ -122,11 +134,12 @@ interface LiveConnectionManager {
      */
     addPeer(pubkeyHex: string): void;
     /**
-     * Send a message to a connected peer (best-effort).
+     * Send a message to a connected peer.
      * If the peer is in `connected`, sends the payload over the data channel.
-     * If not connected: dropped silently (no queue, no return of failure).
+     * Returns failure when the manager is closed, the peer is unavailable, or
+     * the data-channel send fails.
      */
-    sendToPeer(toPubkeyHex: string, payload: Uint8Array): void;
+    sendToPeer(toPubkeyHex: string, payload: Uint8Array): Result<void>;
     /**
      * Close all connections and clean up resources.
      */
@@ -233,6 +246,12 @@ interface TimerFiredEventDetail {
 }
 type CoralieBytePayload = Uint8Array | readonly number[];
 type MaybePromise<T> = T | Promise<T>;
+type CoralieSendMessageErrorName = 'PeerUnavailableError' | 'PermissionRejectedError' | 'InvalidArgumentError' | 'CoralieHostError';
+interface CoralieSendMessageError extends Error {
+    name: CoralieSendMessageErrorName;
+    operation: 'sendMessage';
+    target: string;
+}
 /**
  * Flat page-facing API shared by Android's native bridge and the browser host.
  * Page code should use `await` for consumed return values because a host
@@ -243,7 +262,7 @@ interface CoralieHost {
     hostKind(): CoralieHostKind;
     getPubkey(): MaybePromise<string>;
     addPeer(pubkeyHex: string): MaybePromise<void>;
-    sendMessage(toPubkeyHex: string, payload: CoralieBytePayload): MaybePromise<void>;
+    sendMessage(toPubkeyHex: string, payload: CoralieBytePayload): void;
     getPeersJson(): MaybePromise<string>;
     reset(): MaybePromise<string>;
     close(): MaybePromise<void>;
@@ -341,6 +360,7 @@ declare class BrowserCoralieHost implements CoralieHost {
     private generateId;
     private assertPubkey;
     private assertMeshOpen;
+    private sendMessageError;
     private nowMs;
 }
 
@@ -354,4 +374,4 @@ declare class BrowserCoralieHost implements CoralieHost {
  */
 declare function installBrowserCoralie(options?: CreateLiveConnectionManagerOptions): CoralieHost | undefined;
 
-export { BrowserCoralieHost, type CoralieBytePayload, type CoralieHost, type CoralieHostKind, type CreateLiveConnectionManagerOptions, type HttpFailureDiagnostic, type HttpRequestData, type HttpResponseData, LinkState, type LiveConnectionManager, type MeshPeer$1 as LiveMeshPeer, type PeerMessage as LivePeerMessage, type TerminalFailure$1 as LiveTerminalFailure, MAX_HTTP_RESPONSE_BYTES, type MaybePromise, type MeshPeer, type PeerMessageEventDetail, type SharedFlow, type StateFlow, type TerminalFailure, type TerminalFailureEventDetail, type TimerFiredEventDetail, type TimerInfo, createLiveConnectionManager, installBrowserCoralie };
+export { BrowserCoralieHost, type CoralieBytePayload, type CoralieHost, type CoralieHostKind, type CoralieSendMessageError, type CoralieSendMessageErrorName, type CreateLiveConnectionManagerOptions, type HttpFailureDiagnostic, type HttpRequestData, type HttpResponseData, LinkState, type LiveConnectionManager, type MeshPeer$1 as LiveMeshPeer, type PeerMessage as LivePeerMessage, type TerminalFailure$1 as LiveTerminalFailure, MAX_HTTP_RESPONSE_BYTES, type MaybePromise, type MeshPeer, type PeerMessageEventDetail, type SharedFlow, type StateFlow, type TerminalFailure, type TerminalFailureEventDetail, type TimerFiredEventDetail, type TimerInfo, createLiveConnectionManager, installBrowserCoralie };

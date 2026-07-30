@@ -3,6 +3,8 @@ import { LinkState } from '../../core/types'
 import { LiveAnswerer } from '../answerer'
 import { LiveInitiator } from '../initiator'
 import { createLinkedMockPeerConnections } from '../peer-connection'
+import type { DataChannelLike } from '../peer-connection'
+import { LivePeerLink } from './peer-link.live'
 
 async function connectedPair() {
   const [initiatorPc, answererPc] = createLinkedMockPeerConnections()
@@ -26,7 +28,7 @@ describe('LivePeerLink', () => {
     b.incomingBytes.subscribe((bytes) => received.push(bytes))
 
     const payload = new Uint8Array([1, 2, 3])
-    a.send(payload)
+    expect(a.send(payload)).toEqual({ ok: true, value: undefined })
 
     expect(received).toEqual([payload])
   })
@@ -54,11 +56,37 @@ describe('LivePeerLink', () => {
     expect(a.state.value).toBe('closed')
   })
 
-  it('throws if send() is called after close()', async () => {
+  it('returns failure if send() is called after close()', async () => {
     const { initiator } = await connectedPair()
     const a = initiator.peerLink!
     a.close()
-    expect(() => a.send(new Uint8Array([1]))).toThrow()
+    const result = a.send(new Uint8Array([1]))
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.message).toBe('cannot send on a closed PeerLink')
+    }
+  })
+
+  it('returns a channel send failure instead of throwing', () => {
+    const channel: DataChannelLike = {
+      label: 'test',
+      readyState: 'open',
+      onopen: null,
+      onclose: null,
+      onmessage: null,
+      send() {
+        throw new Error('underlying send failed')
+      },
+      close() {},
+    }
+    const link = new LivePeerLink(channel)
+
+    const result = link.send(new Uint8Array([1]))
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.message).toBe('underlying send failed')
+    }
   })
 
   it("closing the underlying Initiator's connection closes its PeerLink", async () => {

@@ -1,5 +1,6 @@
 import type { SharedFlow } from '../../core/shared-flow'
 import type { StateFlow } from '../../core/state-flow'
+import type { Result } from '../../core/types'
 
 export type PeerLinkState = 'open' | 'closed'
 
@@ -11,6 +12,6 @@ export type PeerLinkState = 'open' | 'closed'
 export interface PeerLink {
   readonly state: StateFlow<PeerLinkState>
   readonly incomingBytes: SharedFlow<Uint8Array>
-  send(data: Uint8Array): void
+  send(data: Uint8Array): Result<void>
   close(): void
 }

@@ -10,6 +10,8 @@ import type {
 import type {
   CoralieBytePayload,
   CoralieHost,
+  CoralieSendMessageError,
+  CoralieSendMessageErrorName,
   HttpFailureDiagnostic,
   HttpRequestData,
   HttpResponseData,
@@ -111,20 +113,48 @@ export class BrowserCoralieHost implements CoralieHost {
     toPubkeyHex: string,
     payload: CoralieBytePayload,
   ): void {
-    this.assertMeshOpen()
-    this.assertPubkey(toPubkeyHex, 'toPubkeyHex')
+    const target = String(toPubkeyHex).toLowerCase()
 
-    const bytes = this.normaliseOutgoingPayload(payload)
-    const normalizedPubkey = toPubkeyHex.toLowerCase()
+    if (this.meshClosed) {
+      throw this.sendMessageError(
+        'CoralieHostError',
+        'Unable to send message',
+        target,
+      )
+    }
+
+    let bytes: Uint8Array
+    try {
+      this.assertPubkey(target, 'toPubkeyHex')
+      bytes = this.normaliseOutgoingPayload(payload)
+    } catch (error) {
+      throw this.sendMessageError(
+        'InvalidArgumentError',
+        error instanceof Error ? error.message : String(error),
+        target,
+      )
+    }
+
     const connected = this.currentPeers.some(
-      (peer) => peer.pubkeyHex === normalizedPubkey,
+      (peer) => peer.pubkeyHex === target,
     )
 
     if (!connected) {
-      throw new Error(`Peer is not connected: ${normalizedPubkey}`)
+      throw this.sendMessageError(
+        'PeerUnavailableError',
+        'Peer disconnected or channel unavailable',
+        target,
+      )
     }
 
-    this.manager.sendToPeer(normalizedPubkey, bytes)
+    const result = this.manager.sendToPeer(target, bytes)
+    if (!result.ok) {
+      throw this.sendMessageError(
+        'PeerUnavailableError',
+        'Peer disconnected or channel unavailable',
+        target,
+      )
+    }
   }
 
   getPeersJson(): string {
@@ -437,14 +467,14 @@ export class BrowserCoralieHost implements CoralieHost {
       )
     }
 
-    return Uint8Array.from(payload, (value, index) => {
+    return Uint8Array.from(payload, (value) => {
       if (
         !Number.isInteger(value) ||
         value < 0 ||
         value > 255
       ) {
         throw new RangeError(
-          `payload[${index}] must be an integer between 0 and 255`,
+          'payload[index] must be between 0 and 255',
         )
       }
       return value
@@ -832,6 +862,18 @@ export class BrowserCoralieHost implements CoralieHost {
         'Coralie mesh is closed',
       )
     }
+  }
+
+  private sendMessageError(
+    name: CoralieSendMessageErrorName,
+    message: string,
+    target: string,
+  ): CoralieSendMessageError {
+    const error = new Error(message) as CoralieSendMessageError
+    error.name = name
+    error.operation = 'sendMessage'
+    error.target = target
+    return error
   }
 
   private nowMs(): number {

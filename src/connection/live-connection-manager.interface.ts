@@ -1,6 +1,6 @@
 import type { SharedFlow } from '../core/shared-flow'
 import type { StateFlow } from '../core/state-flow'
-import type { PeerMessage, TerminalFailure } from '../core/types'
+import type { PeerMessage, Result, TerminalFailure } from '../core/types'
 
 /**
  * Lightweight peer metadata exposed to the application.
@@ -56,11 +56,12 @@ export interface LiveConnectionManager {
   addPeer(pubkeyHex: string): void
 
   /**
-   * Send a message to a connected peer (best-effort).
+   * Send a message to a connected peer.
    * If the peer is in `connected`, sends the payload over the data channel.
-   * If not connected: dropped silently (no queue, no return of failure).
+   * Returns failure when the manager is closed, the peer is unavailable, or
+   * the data-channel send fails.
    */
-  sendToPeer(toPubkeyHex: string, payload: Uint8Array): void
+  sendToPeer(toPubkeyHex: string, payload: Uint8Array): Result<void>
 
   /**
    * Close all connections and clean up resources.

@@ -13,8 +13,10 @@ import type {
 } from '../connection/live-connection-manager.interface'
 import type {
   PeerMessage,
+  Result,
   TerminalFailure as LiveTerminalFailure,
 } from '../core/types'
+import { err, ok } from '../core/types'
 import { createMockSharedFlow } from '../core/shared-flow/shared-flow.mock'
 import { createMockStateFlow } from '../core/state-flow/state-flow.mock'
 import type {
@@ -41,7 +43,10 @@ class TestCustomEvent<T> {
   }
 }
 
-function createManagerFixture(initialPeers: LiveMeshPeer[] = []) {
+function createManagerFixture(
+  initialPeers: LiveMeshPeer[] = [],
+  sendResult: Result<void> = ok(undefined),
+) {
   const peers = createMockStateFlow<Set<LiveMeshPeer>>(
     new Set(initialPeers),
   )
@@ -63,6 +68,7 @@ function createManagerFixture(initialPeers: LiveMeshPeer[] = []) {
         toPubkeyHex,
         payload: Array.from(payload as Uint8Array),
       })
+      return sendResult
     },
     close: vi.fn(),
   }
@@ -179,7 +185,9 @@ describe('BrowserCoralieHost', () => {
     ])
     const host = new BrowserCoralieHost({}, () => fixture.manager)
 
-    host.sendMessage(peerKey, new Uint8Array([1, 2, 255]))
+    expect(
+      host.sendMessage(peerKey.toUpperCase(), new Uint8Array([1, 2, 255])),
+    ).toBeUndefined()
 
     expect(fixture.sent).toEqual([
       {
@@ -205,6 +213,85 @@ describe('BrowserCoralieHost', () => {
       timestamp: 42,
       payload: [7, 8],
     } satisfies PeerMessageEventDetail)
+  })
+
+  it.each([
+    [
+      'not-a-key',
+      [1],
+      'toPubkeyHex must be a 64-character hexadecimal public key',
+      'not-a-key',
+    ],
+    [
+      'B'.repeat(64),
+      [256],
+      'payload[index] must be between 0 and 255',
+      'b'.repeat(64),
+    ],
+  ])(
+    'reports invalid send arguments with normalized metadata',
+    (target, payload, message, normalizedTarget) => {
+      const fixture = createManagerFixture()
+      const host = new BrowserCoralieHost({}, () => fixture.manager)
+
+      expect(() => host.sendMessage(target, payload)).toThrow(
+        expect.objectContaining({
+          name: 'InvalidArgumentError',
+          message,
+          operation: 'sendMessage',
+          target: normalizedTarget,
+        }),
+      )
+    },
+  )
+
+  it('reports an unavailable peer with the stable error contract', () => {
+    const target = 'B'.repeat(64)
+    const fixture = createManagerFixture()
+    const host = new BrowserCoralieHost({}, () => fixture.manager)
+
+    expect(() => host.sendMessage(target, [1])).toThrow(
+      expect.objectContaining({
+        name: 'PeerUnavailableError',
+        message: 'Peer disconnected or channel unavailable',
+        operation: 'sendMessage',
+        target: target.toLowerCase(),
+      }),
+    )
+  })
+
+  it('maps a synchronous delivery failure to PeerUnavailableError', () => {
+    const target = 'b'.repeat(64)
+    const fixture = createManagerFixture(
+      [{ pubkeyHex: target, connectedAt: 123 }],
+      err(new Error('channel send failed')),
+    )
+    const host = new BrowserCoralieHost({}, () => fixture.manager)
+
+    expect(() => host.sendMessage(target, [1])).toThrow(
+      expect.objectContaining({
+        name: 'PeerUnavailableError',
+        message: 'Peer disconnected or channel unavailable',
+        operation: 'sendMessage',
+        target,
+      }),
+    )
+  })
+
+  it('reports a closed mesh as a host error', () => {
+    const target = 'B'.repeat(64)
+    const fixture = createManagerFixture()
+    const host = new BrowserCoralieHost({}, () => fixture.manager)
+    host.close()
+
+    expect(() => host.sendMessage(target, [1])).toThrow(
+      expect.objectContaining({
+        name: 'CoralieHostError',
+        message: 'Unable to send message',
+        operation: 'sendMessage',
+        target: target.toLowerCase(),
+      }),
+    )
   })
 
   it('converts response headers without requiring entries()', async () => {

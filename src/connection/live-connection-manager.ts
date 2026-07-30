@@ -4,7 +4,7 @@ import type { PeerLink } from '../webrtc/peer-link'
 import type { SignallingClient } from '../nostr/signalling-client'
 import type { MutableSharedFlow } from '../core/shared-flow'
 import type { MutableStateFlow } from '../core/state-flow'
-import type { DataChannelFrame, SessionDescriptionData, LinkState, TerminalFailure, PeerMessage } from '../core/types'
+import type { DataChannelFrame, SessionDescriptionData, LinkState, TerminalFailure, PeerMessage, Result } from '../core/types'
 import type { PeerConnectionFactory, PeerConnectionObserver } from '../webrtc/peer-connection'
 
 import { LiveInitiator } from '../webrtc/initiator'
@@ -12,6 +12,7 @@ import { LiveAnswerer } from '../webrtc/answerer'
 import { createStateFlow } from '../core/state-flow'
 import { createSharedFlow } from '../core/shared-flow'
 import type { MeshPeer, LiveConnectionManager as LiveConnectionManagerContract } from './live-connection-manager.interface'
+import { err, ok } from '../core/types'
 
 const HANDSHAKE_TIMEOUT_MS = 30_000
 const MAX_INITIATION_ATTEMPTS = 5
@@ -494,7 +495,10 @@ export class LiveConnectionManager implements LiveConnectionManagerContract {
 
     for (const [peerPubkey, peerLink] of this.connected.entries()) {
       if (peerPubkey === newPubkeyHex) continue // Don't tell the new peer about itself
-      peerLink.send(bytes)
+      const result = peerLink.send(bytes)
+      if (!result.ok && this.connected.get(peerPubkey) === peerLink) {
+        this.onLinkClosed(peerPubkey)
+      }
     }
   }
 
@@ -535,13 +539,17 @@ export class LiveConnectionManager implements LiveConnectionManagerContract {
 
   /**
    * Send a message to a connected peer via data channel.
-   * If not connected: dropped silently.
+   * Returns a failure if the manager or peer channel is unavailable.
    */
-  sendToPeer(toPubkeyHex: string, payload: Uint8Array): void {
-    if (this.closed) return
+  sendToPeer(toPubkeyHex: string, payload: Uint8Array): Result<void> {
+    if (this.closed) {
+      return err(new Error('connection manager is closed'))
+    }
 
     const peerLink = this.connected.get(toPubkeyHex)
-    if (!peerLink) return
+    if (!peerLink) {
+      return err(new Error('peer is not connected'))
+    }
 
     const frame: DataChannelFrame = {
       type: 'app',
@@ -549,7 +557,14 @@ export class LiveConnectionManager implements LiveConnectionManagerContract {
     }
 
     const bytes = new TextEncoder().encode(JSON.stringify(frame))
-    peerLink.send(bytes)
+    const result = peerLink.send(bytes)
+    if (!result.ok) {
+      if (this.connected.get(toPubkeyHex) === peerLink) {
+        this.onLinkClosed(toPubkeyHex)
+      }
+      return result
+    }
+    return ok(undefined)
   }
 
   /**

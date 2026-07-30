@@ -3,6 +3,7 @@ import { LiveConnectionManager } from './live-connection-manager'
 import type { LiveConnectionManager as ILiveConnectionManager } from './live-connection-manager.interface'
 import type { SignallingClient } from '../nostr/signalling-client'
 import type { SessionDescriptionData } from '../core/types'
+import { err } from '../core/types'
 import { createSharedFlow } from '../core/shared-flow'
 import { MockPeerConnection } from '../webrtc/peer-connection'
 import { MockPeerLink } from '../webrtc/peer-link'
@@ -338,7 +339,9 @@ describe('LiveConnectionManager — Six Core Rules', () => {
       }
       concreteManager.connected.set('peer-1', peerLink)
 
-      manager.sendToPeer('peer-1', new Uint8Array([0, 127, 128, 255]))
+      expect(
+        manager.sendToPeer('peer-1', new Uint8Array([0, 127, 128, 255])),
+      ).toEqual({ ok: true, value: undefined })
 
       expect(peerLink.sent).toHaveLength(1)
       const frame = JSON.parse(new TextDecoder().decode(peerLink.sent[0]))
@@ -346,6 +349,29 @@ describe('LiveConnectionManager — Six Core Rules', () => {
         type: 'app',
         payload: [0, 127, -128, -1],
       })
+    })
+
+    it('returns failure for a missing peer', () => {
+      const result = manager.sendToPeer('missing-peer', new Uint8Array([1]))
+
+      expect(result.ok).toBe(false)
+    })
+
+    it('removes and closes a link whose delivery fails', () => {
+      const peerLink = new MockPeerLink()
+      vi.spyOn(peerLink, 'send').mockReturnValue(
+        err(new Error('data channel failed')),
+      )
+      const concreteManager = manager as unknown as {
+        connected: Map<string, MockPeerLink>
+      }
+      concreteManager.connected.set('peer-1', peerLink)
+
+      const result = manager.sendToPeer('peer-1', new Uint8Array([1]))
+
+      expect(result.ok).toBe(false)
+      expect(peerLink.state.value).toBe('closed')
+      expect(concreteManager.connected.has('peer-1')).toBe(false)
     })
 
     it('normalises signed Android bytes when receiving an app frame', () => {
@@ -384,6 +410,26 @@ describe('LiveConnectionManager — Six Core Rules', () => {
         type: 'announce',
         pubkeyHex: 'new-peer',
       })
+    })
+
+    it('removes and closes a link whose announcement delivery fails', () => {
+      const existingPeer = new MockPeerLink()
+      vi.spyOn(existingPeer, 'send').mockReturnValue(
+        err(new Error('data channel failed')),
+      )
+      const newPeer = new MockPeerLink()
+      const concreteManager = manager as unknown as {
+        connected: Map<string, MockPeerLink>
+        broadcastAnnounce(newPubkeyHex: string): void
+      }
+      concreteManager.connected.set('existing-peer', existingPeer)
+      concreteManager.connected.set('new-peer', newPeer)
+
+      concreteManager.broadcastAnnounce('new-peer')
+
+      expect(existingPeer.state.value).toBe('closed')
+      expect(concreteManager.connected.has('existing-peer')).toBe(false)
+      expect(concreteManager.connected.has('new-peer')).toBe(true)
     })
   })
 

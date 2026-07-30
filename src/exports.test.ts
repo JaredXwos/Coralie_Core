@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type {
   CoralieHost,
+  CoralieSendMessageError,
+  CoralieSendMessageErrorName,
   TerminalFailure,
   TerminalFailureEventDetail,
 } from './index'
@@ -15,6 +17,14 @@ import type {
  * causes TypeScript or the DTS build to fail before these tests run.
  */
 describe('exports (build-output test)', () => {
+  it('should expose the structural send-message error types', () => {
+    const name: CoralieSendMessageErrorName = 'PeerUnavailableError'
+    const error: CoralieSendMessageError | null = null
+
+    expect(name).toBe('PeerUnavailableError')
+    expect(error).toBeNull()
+  })
+
   it('should export the connection-manager factory', async () => {
     const mod = await import('../dist/index.js')
     expect(typeof mod.createLiveConnectionManager).toBe('function')

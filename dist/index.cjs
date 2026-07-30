@@ -114,9 +114,16 @@ var LivePeerLink = class {
   }
   send(data) {
     if (this.stateFlow.value !== "open") {
-      throw new Error("cannot send on a closed PeerLink");
+      return err(new Error("cannot send on a closed PeerLink"));
     }
-    this.channel.send(data);
+    try {
+      this.channel.send(data);
+      return ok(void 0);
+    } catch (error) {
+      return err(
+        error instanceof Error ? error : new Error(String(error))
+      );
+    }
   }
   close() {
     if (this.stateFlow.value === "closed") return;
@@ -559,7 +566,10 @@ var LiveConnectionManager = class {
     const bytes = new TextEncoder().encode(JSON.stringify(frame));
     for (const [peerPubkey, peerLink] of this.connected.entries()) {
       if (peerPubkey === newPubkeyHex) continue;
-      peerLink.send(bytes);
+      const result = peerLink.send(bytes);
+      if (!result.ok && this.connected.get(peerPubkey) === peerLink) {
+        this.onLinkClosed(peerPubkey);
+      }
     }
   }
   /**
@@ -593,18 +603,29 @@ var LiveConnectionManager = class {
   }
   /**
    * Send a message to a connected peer via data channel.
-   * If not connected: dropped silently.
+   * Returns a failure if the manager or peer channel is unavailable.
    */
   sendToPeer(toPubkeyHex, payload) {
-    if (this.closed) return;
+    if (this.closed) {
+      return err(new Error("connection manager is closed"));
+    }
     const peerLink = this.connected.get(toPubkeyHex);
-    if (!peerLink) return;
+    if (!peerLink) {
+      return err(new Error("peer is not connected"));
+    }
     const frame = {
       type: "app",
       payload: Array.from(payload, (value) => value > 127 ? value - 256 : value)
     };
     const bytes = new TextEncoder().encode(JSON.stringify(frame));
-    peerLink.send(bytes);
+    const result = peerLink.send(bytes);
+    if (!result.ok) {
+      if (this.connected.get(toPubkeyHex) === peerLink) {
+        this.onLinkClosed(toPubkeyHex);
+      }
+      return result;
+    }
+    return ok(void 0);
   }
   /**
    * Close all connections and stop timers.
@@ -1096,17 +1117,43 @@ var BrowserCoralieHost = class {
     this.manager.addPeer(pubkeyHex.toLowerCase());
   }
   sendMessage(toPubkeyHex, payload) {
-    this.assertMeshOpen();
-    this.assertPubkey(toPubkeyHex, "toPubkeyHex");
-    const bytes = this.normaliseOutgoingPayload(payload);
-    const normalizedPubkey = toPubkeyHex.toLowerCase();
+    const target = String(toPubkeyHex).toLowerCase();
+    if (this.meshClosed) {
+      throw this.sendMessageError(
+        "CoralieHostError",
+        "Unable to send message",
+        target
+      );
+    }
+    let bytes;
+    try {
+      this.assertPubkey(target, "toPubkeyHex");
+      bytes = this.normaliseOutgoingPayload(payload);
+    } catch (error) {
+      throw this.sendMessageError(
+        "InvalidArgumentError",
+        error instanceof Error ? error.message : String(error),
+        target
+      );
+    }
     const connected = this.currentPeers.some(
-      (peer) => peer.pubkeyHex === normalizedPubkey
+      (peer) => peer.pubkeyHex === target
     );
     if (!connected) {
-      throw new Error(`Peer is not connected: ${normalizedPubkey}`);
+      throw this.sendMessageError(
+        "PeerUnavailableError",
+        "Peer disconnected or channel unavailable",
+        target
+      );
     }
-    this.manager.sendToPeer(normalizedPubkey, bytes);
+    const result = this.manager.sendToPeer(target, bytes);
+    if (!result.ok) {
+      throw this.sendMessageError(
+        "PeerUnavailableError",
+        "Peer disconnected or channel unavailable",
+        target
+      );
+    }
   }
   getPeersJson() {
     this.assertMeshOpen();
@@ -1343,10 +1390,10 @@ var BrowserCoralieHost = class {
         "payload must be a Uint8Array or integer array"
       );
     }
-    return Uint8Array.from(payload, (value, index) => {
+    return Uint8Array.from(payload, (value) => {
       if (!Number.isInteger(value) || value < 0 || value > 255) {
         throw new RangeError(
-          `payload[${index}] must be an integer between 0 and 255`
+          "payload[index] must be between 0 and 255"
         );
       }
       return value;
@@ -1590,6 +1637,13 @@ var BrowserCoralieHost = class {
         "Coralie mesh is closed"
       );
     }
+  }
+  sendMessageError(name, message, target) {
+    const error = new Error(message);
+    error.name = name;
+    error.operation = "sendMessage";
+    error.target = target;
+    return error;
   }
   nowMs() {
     return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
