@@ -8,7 +8,7 @@ description: Coordinate container-codex workers for agent-owned repository chang
 ## Roles
 
 - If you are the coordinator and container-codex is available, remain read-only and delegate repository writes to a container worker.
-- If you are a worker explicitly assigned edits inside `/workspaces/Coralie_Core`, edit directly and do not recursively delegate.
+- If you are a worker explicitly assigned edits and already running inside the repository workspace (the repository root can be determined with `git rev-parse --show-toplevel`), edit directly and do not recursively delegate.
 - Do not expand the requested scope.
 
 ## Workflow
