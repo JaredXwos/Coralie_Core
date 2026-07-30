@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestrate Container Codex Workers"
+  short_description: "Coordinate safe container-backed repository work"
+  default_prompt: "Use $orchestrate-container-codex-workers to implement, commit, and independently verify this repository change."
